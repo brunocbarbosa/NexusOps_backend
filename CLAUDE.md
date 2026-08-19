@@ -102,6 +102,10 @@ touching any of them.
 
 `npm test` (unit) stays green without Docker running; `npm run test:e2e` requires `npm run infra:up`.
 
+Unrelated v7 rename that costs a minute each time: `prisma migrate diff` dropped
+`--from-schema-datasource`. Comparing the live database against a candidate schema is now
+`--from-schema prisma/schema.prisma --to-schema <other> --script`.
+
 ## Architecture
 
 The five problems below are the reason this project exists. Each has a designated mechanism, and
@@ -122,6 +126,45 @@ The critical consequence: **BullMQ workers and WebSocket handlers have no HTTP r
 `AsyncLocalStorage` context is empty there. Tenant identity must be carried explicitly in the job
 payload and re-established inside the worker before any query runs. This is the single most
 likely place for a tenant leak.
+
+`src/tenancy/` implements both layers' first half. Measured against Prisma 7.9.1, and the design
+depends on all five:
+
+- **`findUnique` accepts a non-unique extra field in `where`.** `{ where: { id, tenantId } }` is
+  valid and filters correctly, so the extension injects `where.tenantId` uniformly and never
+  rewrites `findUnique` into `findFirst`. Cross-tenant `update`/`delete` surface as `P2025` with the
+  other tenant's row untouched — which makes the API answer 404, not 403, so it does not confirm
+  that another tenant's resource exists.
+- **`PrismaPromise` is lazy, and that will eat your context.** The query is dispatched when the
+  promise is awaited, not when the method is called. So `als.run(store, () => prisma.x.findMany())`
+  dispatches *outside* the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
+  `storage.run`; do not "simplify" it back to a synchronous wrapper. Symptom when this regresses:
+  `TenantContextMissingError` from code that visibly established a tenant.
+- **Query extensions never fire for nested access.** `include: {}` intercepts only the parent
+  operation, and so does a nested `create`. The extension cannot filter a nested read or fix a
+  nested child's `tenantId`.
+- **That hole is closed in the schema, not in the extension.** Child relations use composite foreign
+  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input *without*
+  a `tenantId` field, so the wrong tenant stops being expressible, and a cross-tenant child cannot
+  exist for a nested read to return. Cost: the two optional relations lose `ON DELETE SET NULL` and
+  become `RESTRICT`, because part of a composite key cannot be nulled while `tenant_id` is
+  `NOT NULL`. Deleting a user therefore requires anonymising `audit_logs.user_id` first.
+- **Scoping every model by default fails closed in both directions.** The extension filters every
+  model except an explicit `TENANT_AGNOSTIC` allowlist. Passing `tenantId` to a model that lacks the
+  column raises `PrismaClientValidationError`, so forgetting to exempt an agnostic model breaks
+  loudly, while forgetting to register a new scoped model leaves it already protected. Unknown
+  operations throw rather than run unfiltered, so a Prisma upgrade that adds one cannot leak.
+
+Two things the extension deliberately refuses to make convenient. There is no
+`currentTenantId(): string | undefined`, because `?? fallback` is the silent bypass the design
+exists to prevent — `requireTenantId()` returns a string or throws, and `currentScope()` returns a
+union whose cases must all be handled. And reading `Tenant` unscoped, which the login path needs
+before any tenant identity exists, requires an explicit `runWithoutTenant()`; a merely absent
+context is refused, so a lost context cannot quietly widen into a read of every tenant.
+
+`$queryRaw` / `$executeRaw` are client operations, not model ones, and never reach the extension.
+That, plus a defect in the extension itself, is the entire remaining job for RLS — considerably
+smaller than it looked before these measurements.
 
 RLS will be inert in this project until the application stops connecting as `nexusops`. Two
 mechanisms, and the second is the one that bites — both measured against this repo's own container,

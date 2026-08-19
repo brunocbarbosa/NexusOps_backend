@@ -1,6 +1,7 @@
 # Tenant isolation chokepoint — AsyncLocalStorage + Prisma Client Extension
 
-Status: approved 2026-08-19. Supersedes the assumptions recorded in the domain-modeling slice.
+Status: implemented 2026-08-19. Supersedes the assumptions recorded in the domain-modeling slice.
+Three sections were revised during implementation, each marked with what forced the change.
 
 ## Problem
 
@@ -96,14 +97,22 @@ await tx.user.delete({ where: { tenantId_id: { tenantId, id: userId } } });
 
 ### `src/tenancy/tenant-context.ts`
 
-An `AsyncLocalStorage` store with exactly two exports:
+An `AsyncLocalStorage` store with four exports:
 
-- `runWithTenant<T>(tenantId: string, fn: () => T): T` — establishes the scope.
-- `requireTenantId(): string` — returns the current tenant, or throws `TenantContextMissingError`.
+- `runWithTenant<T>(tenantId, fn): Promise<T>` — establishes the scope.
+- `runWithoutTenant<T>(fn): Promise<T>` — unlocks tenant-agnostic models only.
+- `requireTenantId(): string` — the current tenant, or `TenantContextMissingError`.
+- `currentScope(): TenantScope` — for the extension's own branching.
+
+**Both runners are async, and they await `fn()` inside `storage.run`.** This was discovered during
+implementation, by a test failure: `PrismaPromise` is lazy, so the query is dispatched when the
+promise is awaited rather than when the method is called. A synchronous wrapper lets
+`runWithTenant(id, () => prisma.ticket.findMany())` dispatch *outside* the scope. Eight tests failed
+this way before the fix. Do not simplify it back.
 
 Deliberately **no** `currentTenantId(): string | undefined`. A getter that can return `undefined`
-invites `?? someDefault`, which is the silent bypass this whole design exists to prevent. Code that
-needs a tenant either has one or fails.
+invites `?? someDefault`, which is the silent bypass this whole design exists to prevent.
+`currentScope()` returns a discriminated union instead, so every case has to be handled.
 
 `runWithTenant` is also the worker and gateway entry point: a BullMQ processor reads the tenant from
 its job payload and wraps its body in it. Forgetting to wrap does not leak, because
@@ -122,10 +131,21 @@ For every other model, `requireTenantId()` first, then by operation:
 
 | Operations | Injection |
 |---|---|
-| `findMany` `findFirst` `findFirstOrThrow` `findUnique` `findUniqueOrThrow` `count` `aggregate` `groupBy` `update` `updateMany` `delete` `deleteMany` | `args.where = { ...args.where, tenantId }` |
+| `findUnique` `findUniqueOrThrow` `findFirst` `findFirstOrThrow` `findMany` `count` `aggregate` `groupBy` `delete` `deleteMany` | `args.where = { ...args.where, tenantId }` |
+| `update` `updateMany` `updateManyAndReturn` | same, **and** `data.tenantId` is rejected outright |
 | `create` | `args.data.tenantId = tenantId` |
 | `createMany` `createManyAndReturn` | inject into every element of `args.data` |
-| `upsert` | both: `args.where` and `args.create` |
+| `upsert` | `args.where` and `args.create`; `args.update.tenantId` rejected |
+| anything else, including `findRaw` / `aggregateRaw` | **throws** |
+
+Two corrections to the operation list as first drafted. `updateManyAndReturn` exists and was missing —
+an unclassified write operation is a leak, which is why the final branch throws instead of falling
+through: a Prisma upgrade that adds an operation now breaks loudly.
+
+And an update must not be allowed to touch `tenantId` at all. The `where` filter confines an update to
+the caller's own rows, but `data: { tenantId: other }` would move a row *out* of the tenant — a leak
+the where-filter does not catch. Both the `{ tenantId: x }` and `{ tenantId: { set: x } }` forms are
+rejected.
 
 Two rules about conflicts, chosen to differ on purpose:
 
@@ -134,12 +154,15 @@ Two rules about conflicts, chosen to differ on purpose:
 - In `data`, a caller-supplied `tenantId` that differs from the context **throws**. Explicitly
   writing into another tenant is a bug, not a preference, and overwriting it silently would hide it.
 
-**`Tenant` is exempt but not unguarded.** Leaving it fully unscoped would make
-`tenant.findMany({ include: { tickets: true } })` a leak path. So when a context exists, `Tenant`
-operations that take a `where` get `where.id = tenantId`. With no context at all, `Tenant` passes
-through unscoped — that is the login path, which must find a tenant by domain before any tenant
-identity exists. This is the one intentional fail-open, and it is narrow: `Tenant` rows hold a name,
-a domain and an active flag, not customer data.
+**`Tenant` is exempt from tenant filtering but not unguarded.** Leaving it fully unscoped would make
+`tenant.findMany({ include: { tickets: true } })` a leak path. So inside a tenant context, `Tenant`
+operations that take a `where` get `where.id = tenantId`.
+
+Reading it in full requires `runWithoutTenant()` explicitly; a merely **absent** context is refused
+like anywhere else. The first draft of this design had absent-context mean unscoped, which was the
+one fail-open. The lazy-`PrismaPromise` failure above is exactly what made that unacceptable: losing
+a context by accident is easy, and under the old rule it silently widened a `Tenant` read into a read
+of every tenant. Under the new rule that same accident throws.
 
 ### What this slice provably does not cover
 
