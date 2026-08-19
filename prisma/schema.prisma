@@ -20,3 +20,145 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// ==========================================
+// ENUMS
+// ==========================================
+enum UserRole {
+  ADMIN
+  AGENT
+  REQUESTER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+// ==========================================
+// 1. TENANT (empresa cliente)
+// ==========================================
+// Nao leva @@unique([tenantId, id]): Tenant nao e tenant-scoped, ele *e* o tenant.
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  domain    String?  @unique @db.VarChar(100)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users     User[]
+  tickets   Ticket[]
+  comments  Comment[]
+  auditLogs AuditLog[]
+
+  @@map("tenants")
+}
+
+// ==========================================
+// 2. USER (controle de acesso - RBAC)
+// ==========================================
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  email        String   @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         UserRole @default(REQUESTER)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticketsCreated  Ticket[]   @relation("TicketRequester")
+  ticketsAssigned Ticket[]   @relation("TicketAssignee")
+  comments        Comment[]
+  auditLogs       AuditLog[]
+
+  // Um e-mail nao se repete dentro da mesma empresa, mas pode existir em outra.
+  @@unique([tenantId, email])
+  // Da a extension um caminho garantido para escopar findUnique por tenant:
+  //   where: { tenantId_id: { tenantId, id } }
+  // Tambem substitui @@index([tenantId]) - um unique composto em (tenant_id, id)
+  // ja e um indice com tenant_id como coluna lider.
+  @@unique([tenantId, id])
+  @@map("users")
+}
+
+// ==========================================
+// 3. TICKET (core domain)
+// ==========================================
+model Ticket {
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  requesterId String       @map("requester_id") @db.Uuid
+  assigneeId  String?      @map("assignee_id") @db.Uuid
+  title       String       @db.VarChar(255)
+  description String?      @db.Text
+  status      TicketStatus @default(OPEN)
+
+  // CONTROLE OTIMISTA DE CONCORRENCIA.
+  // A atualizacao segura e updateMany({ where: { id, tenantId, version } }) e nao
+  // update(): `update` exige um where unico, e { id, version } nao e unico.
+  // count === 0 significa que outro request ja alterou a linha -> 409 Conflict.
+  version     Int          @default(1)
+
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  // Relacoes single-column de proposito: a identidade composta ficou como unique,
+  // nao como PK, para que as FKs e as URLs externas sigam usando apenas o id.
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester User      @relation("TicketRequester", fields: [requesterId], references: [id])
+  assignee  User?     @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  comments  Comment[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@map("tickets")
+}
+
+// ==========================================
+// 4. COMMENT (conversa dentro do chamado)
+// ==========================================
+model Comment {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  body      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@unique([tenantId, id])
+  @@index([tenantId, ticketId])
+  @@map("comments")
+}
+
+// ==========================================
+// 5. AUDIT LOG (trilha de auditoria)
+// ==========================================
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  entityType String   @map("entity_type") @db.VarChar(50)
+  entityId   String   @map("entity_id") @db.Uuid
+  action     String   @db.VarChar(50)
+
+  // Json do Prisma -> JSONB no PostgreSQL.
+  oldValues Json? @map("old_values")
+  newValues Json? @map("new_values")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, id])
+  // tenant_id lidera: toda consulta de auditoria e tenant-scoped, e sem ele na
+  // frente o indice nao entra no plano de execucao.
+  @@index([tenantId, entityType, entityId])
+  @@map("audit_logs")
+}
