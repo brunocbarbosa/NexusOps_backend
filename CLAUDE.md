@@ -1,0 +1,196 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+NexusOps is a B2B multi-tenant SaaS backend for corporate automation and helpdesk, built as a
+portfolio project whose explicit goal is to solve senior-level engineering problems — not just to
+deliver CRUD features. `documents/MAIN.md` is the authoritative project specification (in
+Portuguese); read it before implementing anything architectural, since the "why" behind each
+technology choice is recorded there.
+
+The application code is still a bare NestJS scaffold (`src/app.*`). Infrastructure, dependencies,
+and tooling are in place; the domain modules are not written yet.
+
+## Commands
+
+```bash
+npm run infra:up          # start PostgreSQL + Redis (docker compose, detached)
+npm run infra:down        # stop containers
+npm run infra:reset       # destroy volumes and recreate (wipes local data)
+npm run infra:logs        # tail container logs
+
+npm run start:dev         # dev server, watch mode
+npm run build             # nest build -> dist/
+npm run start:prod        # node dist/main
+
+npm run lint              # eslint --fix over src, apps, libs, test
+npm run format            # prettier --write
+
+npm test                  # jest unit tests (*.spec.ts under src/)
+npm run test:watch
+npm run test:cov
+npm run test:e2e          # e2e + DB-backed tests (needs infra:up)
+
+npm run prisma:generate   # regenerate client into src/generated/prisma
+npm run prisma:migrate    # migrate dev (creates + applies a migration)
+npm run prisma:deploy     # migrate deploy (CI/production)
+npm run prisma:reset      # drop and rebuild the database from migrations
+npm run prisma:studio
+```
+
+Run a single unit test file or a single test by name:
+
+```bash
+npx jest src/path/to/file.spec.ts
+npx jest -t "substring of the test name"
+
+# e2e must keep the --experimental-vm-modules flag (see "Prisma 7 wiring" below):
+node --experimental-vm-modules node_modules/jest/bin/jest.js \
+  --config ./test/jest-e2e.json -t "substring"
+```
+
+Note that `npm run lint` is `eslint --fix`: it rewrites files. Use `npx eslint "src/**/*.ts"`
+when you need a read-only check.
+
+Postgres and Redis must be running for anything touching the database or queues. `npm test` (unit)
+does not need them; `npm run test:e2e` does, because `test/prisma.e2e-spec.ts` opens a real
+connection.
+
+## Environment
+
+`.env` holds local values and is gitignored; `.env.example` is the documented template — keep it in
+sync when adding a variable. `docker-compose.yml` reads `POSTGRES_*` / `REDIS_PORT` from the same
+`.env`, so the compose credentials and `DATABASE_URL` must agree or the app will point at a
+database that does not exist.
+
+Prisma 7 does **not** read `.env` on its own: `prisma.config.ts` imports `dotenv/config`, and that
+is the only reason the CLI sees `DATABASE_URL`. The datasource block in `prisma/schema.prisma`
+therefore has no `url` — the URL is supplied by `prisma.config.ts`. Don't "fix" the schema by
+adding `env("DATABASE_URL")` back to it. Jest picks up `.env` only in the e2e config, via
+`setupFiles: ["dotenv/config"]`.
+
+## Prisma 7 wiring
+
+Prisma 7 is a sharp break from v6 and three separate things must all be right, or the client fails.
+`test/prisma.e2e-spec.ts` is the regression guard for all three — run `npm run test:e2e` after
+touching any of them.
+
+1. **A driver adapter is mandatory** for SQL providers. `new PrismaClient()` with no arguments is a
+   *compile-time* error in v7 ("Expected 1 arguments, but got 0"). The client must be constructed as:
+
+   ```ts
+   import { PrismaPg } from '@prisma/adapter-pg';
+   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+   const prisma = new PrismaClient({ adapter });
+   ```
+
+   Connection pool settings now come from `pg`, not from Prisma, so configure them on the adapter.
+
+2. **The generator must emit CommonJS.** NestJS compiles to CJS, so `prisma/schema.prisma` sets
+   `moduleFormat = "cjs"` and `importFileExtension = ""`. Without the first, `require()` of the
+   client throws "exports is not defined in ES module scope". Without the second, the generated
+   files import each other as `./enums.js` while the emitted files are TypeScript sources, giving
+   `MODULE_NOT_FOUND`. Prisma 7 generates **TypeScript source**, not compiled JS — that is why the
+   extension matters at all.
+
+3. **Jest needs VM modules.** The Prisma runtime uses dynamic `import()`, which Jest's default CJS
+   VM rejects with "A dynamic import callback was invoked without --experimental-vm-modules". The
+   `test:e2e` script therefore runs Jest through `node --experimental-vm-modules` instead of the
+   `jest` binary. Any DB-backed test must run under that script, not `npm test`.
+
+`npm test` (unit) stays green without Docker running; `npm run test:e2e` requires `npm run infra:up`.
+
+## Architecture
+
+The five problems below are the reason this project exists. Each has a designated mechanism, and
+the mechanism is always a chokepoint rather than a per-handler convention — the point is that a
+developer writing a new feature cannot forget to apply it.
+
+**Multi-tenancy — shared database, shared schema.** Two independent layers, deliberately
+redundant:
+
+1. `AsyncLocalStorage` (from `node:async_hooks`, no library) holds the authenticated user's
+   `tenant_id` for the lifetime of a request. A Prisma Client Extension reads it and injects the
+   tenant filter into every query. This is why the tenant filter must never be written by hand in
+   a service — a hand-written query is a query that can be wrong.
+2. PostgreSQL native Row-Level Security as the backstop, in case the extension is bypassed
+   (raw SQL, a mistake in the extension itself).
+
+The critical consequence: **BullMQ workers and WebSocket handlers have no HTTP request**, so the
+`AsyncLocalStorage` context is empty there. Tenant identity must be carried explicitly in the job
+payload and re-established inside the worker before any query runs. This is the single most
+likely place for a tenant leak.
+
+RLS will be inert in this project until the application stops connecting as `nexusops`. Two
+mechanisms, and the second is the one that bites — both measured against this repo's own container,
+not taken from documentation:
+
+- The **table owner** bypasses RLS. `ALTER TABLE ... FORCE ROW LEVEL SECURITY` fixes that case.
+- A **superuser** bypasses RLS unconditionally, and `FORCE` does *not* help. `docker-compose.yml`
+  sets `POSTGRES_USER=nexusops`, and `initdb` makes that role a superuser: `pg_roles` reports
+  `rolsuper = t, rolbypassrls = t`. So with the default `DATABASE_URL`, every policy is dead
+  weight while `pg_policies` still shows the setup as correct — a silent failure that looks like
+  protection.
+
+The fix is a dedicated low-privilege role holding DML only, not owning the tables and not a
+superuser; migrations keep using the owning role. `.env.example` reserves `DATABASE_URL_APP` for it.
+Verified: as `nexusops` a tenant-scoped query returned every tenant's rows even with `FORCE` on; as
+a `NOSUPERUSER NOBYPASSRLS` non-owner it returned only the scoped rows, and zero rows with no tenant set.
+
+**Setting the tenant for RLS must be transaction-scoped, and `SET` cannot do it.** Two traps:
+
+1. `prisma.$executeRaw` always parameterizes interpolated values, and PostgreSQL's `SET` accepts no
+   bind parameters — `` $executeRaw`SET app.tenant_id = ${tenantId}` `` fails every call with
+   `42601: syntax error at or near "$1"`. Use `set_config` instead.
+2. `@prisma/adapter-pg` sends any query outside `$transaction()` straight to the `pg.Pool`, one
+   checkout per call, so a standalone `set_config` and the following query can land on different
+   physical connections — and a session-scoped value lingers on whichever connection last set it.
+   Under concurrency that yields *another single tenant's* rows, intermittently. Measured on a pool
+   of 4 with 60 concurrent requests: 46 of 60 observed the wrong tenant. Pinning one connection per
+   request and using transaction-local scope brought it to 0 of 60.
+
+So the tenant must be set with `set_config('app.tenant_id', $1, true)` — the third argument is
+`is_local` — inside an **interactive** `$transaction(async (tx) => ...)`, which pins one connection
+and resets the value at commit. The array form of `$transaction` does not give that guarantee.
+
+**Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
+version column guards mutable rows; a conflicting update must fail loudly rather than silently
+overwrite. Any new mutable aggregate needs the same guard.
+
+**Reactive audit trail.** `@nestjs/event-emitter` implements an Observer pattern: mutations emit
+events, and the audit module listens and persists log rows in `JSONB`. Business logic must not
+call the audit service directly — that coupling is exactly what this design removes.
+
+**Asynchronous processing.** Anything that would block the Node event loop (report generation,
+file processing) goes to a BullMQ queue on Redis instead of running in the request. Redis is
+configured with `maxmemory-policy noeviction` in `docker-compose.yml` because evicting a BullMQ
+key mid-flight corrupts the queue.
+
+**Real-time notifications.** A NestJS WebSockets Gateway (socket.io) notifies the client when a
+background job finishes. Redis therefore serves double duty: queue backend and permission cache.
+
+## Stack notes
+
+NestJS 11 on Node 24, TypeScript in `strict` mode with `module`/`moduleResolution` set to
+`nodenext`. Prisma 7 generates its client to `src/generated/prisma`, which is gitignored — run
+`npm run prisma:generate` after cloning or after any schema change, or imports will fail to
+resolve.
+
+`package.json` pins an npm `overrides` entry forcing `deepmerge-ts` to `^8.0.1`. This resolves a
+high-severity advisory reachable through the Prisma CLI; removing it reintroduces the
+vulnerability, and the alternative was downgrading Prisma. Re-check whether it is still needed
+when upgrading Prisma.
+
+Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
+(`passport-jwt`) and `bcrypt` for password hashing. Validation uses `class-validator` /
+`class-transformer`, which need a global `ValidationPipe` — not yet registered in `src/main.ts`.
+
+## Repo conventions
+
+`prisma init` installed vendor-maintained Prisma skill files, tracked by `skills-lock.json`.
+`.agents/skills/` holds the real content (~500K, version-pinned to Prisma 7.9.1); `.claude/skills/`
+and `.windsurf/skills/` are **symlink farms pointing into it**. Deleting `.agents/` therefore breaks
+the Claude Code skills too — remove all three or none. These are Prisma's own reference docs, not
+project rules, and they are what documented the three wiring requirements above.

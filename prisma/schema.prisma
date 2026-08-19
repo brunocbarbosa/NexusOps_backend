@@ -1,0 +1,22 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+// NestJS compiles to CommonJS, so the client must be generated as CJS too.
+// Without moduleFormat = "cjs" the generated ESM client fails at require() time
+// with "exports is not defined in ES module scope".
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "cjs"
+  // CJS resolution: extensionless imports work under ts-node, ts-jest and tsc
+  // alike. The default (".js") breaks at require() time because the generated
+  // files are TypeScript sources, not compiled JS.
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
