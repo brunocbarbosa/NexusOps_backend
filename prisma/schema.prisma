@@ -104,11 +104,15 @@ model Ticket {
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
 
-  // Relacoes single-column de proposito: a identidade composta ficou como unique,
-  // nao como PK, para que as FKs e as URLs externas sigam usando apenas o id.
+  // FKs compostas contra @@unique([tenantId, id]) do pai. Isso faz o proprio
+  // Postgres rejeitar uma referencia a registro de outro tenant, independente de
+  // a extension do Prisma estar correta -- e remove tenantId do input de escrita
+  // aninhada, entao o tenant errado deixa de ser expressavel na API.
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  requester User      @relation("TicketRequester", fields: [requesterId], references: [id])
-  assignee  User?     @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  requester User      @relation("TicketRequester", fields: [tenantId, requesterId], references: [tenantId, id])
+  // Restrict e nao SetNull: nao da para anular apenas assigneeId numa chave
+  // composta enquanto tenantId e NOT NULL. Reatribua antes de excluir o usuario.
+  assignee  User?     @relation("TicketAssignee", fields: [tenantId, assigneeId], references: [tenantId, id], onDelete: Restrict)
   comments  Comment[]
 
   @@unique([tenantId, id])
@@ -128,8 +132,8 @@ model Comment {
   createdAt DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  author User   @relation(fields: [authorId], references: [id])
+  ticket Ticket @relation(fields: [tenantId, ticketId], references: [tenantId, id], onDelete: Cascade)
+  author User   @relation(fields: [tenantId, authorId], references: [tenantId, id])
 
   @@unique([tenantId, id])
   @@index([tenantId, ticketId])
@@ -154,7 +158,10 @@ model AuditLog {
   createdAt DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User?  @relation(fields: [userId], references: [id])
+  // Restrict pelo mesmo motivo do assignee. Consequencia aceita: a auditoria
+  // impede excluir usuario com historico. O fluxo de exclusao tem que anonimizar
+  // primeiro (auditLog.updateMany -> userId: null), e esquecer isso falha alto.
+  user   User?  @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Restrict)
 
   @@unique([tenantId, id])
   // tenant_id lidera: toda consulta de auditoria e tenant-scoped, e sem ele na
