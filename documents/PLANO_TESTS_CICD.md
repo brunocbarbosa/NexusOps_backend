@@ -11,8 +11,8 @@
 > | 2 — Três níveis de teste              | ✅ concluída | `7ac02e6` |
 > | 3 — Build de produção e imagem Docker | ✅ concluída | `2830bee` |
 > | 4 — Pipeline GitHub Actions           | ✅ concluída | `ff0b99b` |
-> | 5 — Proteção de branch                | ⬜ pendente  | —         |
-> | 6 — Documentação                      | ⬜ pendente  | —         |
+> | 5 — Proteção de branch                | ✅ concluída | `PEND5`   |
+> | 6 — Documentação                      | ✅ concluída | `PEND5`   |
 >
 > As seções das fases concluídas trazem uma nota **Como saiu** ao final, com os desvios
 > em relação ao que estava planejado e os defeitos encontrados durante a execução.
@@ -392,6 +392,45 @@ Via `gh api` (funciona após a Fase 0 tornar o repo público):
   bloqueia force-push e deleção. Sem exigência de PR, para permitir commit direto durante
   desenvolvimento.
 
+**Como saiu.** Um conflito no plano só apareceu na hora de criar o ruleset: ele pedia, para a
+`development`, status checks obrigatórios **e** commit direto liberado. Os dois não coexistem — no
+GitHub, exigir status check bloqueia também o push direto, porque o commit chega sem check nenhum e
+é rejeitado. Decidido com o usuário exigir PR e checks nas duas branches, que é o que cumpre o
+critério de aceite deste plano; a `development` perde o commit direto e nem o admin escapa
+(`bypass_actors` vazio nos dois rulesets).
+
+`strict_required_status_checks_policy` ficou em `false` nas duas. Exigir a branch atualizada antes
+do merge parece mais rigoroso, mas com vários PRs do Dependabot abertos cada merge invalida todos
+os outros e vira uma rebase em cadeia — custo real, benefício quase nulo num fluxo linear de
+feature → development → main.
+
+**O `commitlint` ficou de fora dos status checks obrigatórios**, seguindo o plano à risca. Vale
+reconsiderar: é o único job cujo defeito não bloqueia nada, o que enfraquece o argumento de que ele
+existe porque `--no-verify` burla o hook local.
+
+**Verificado no GitHub, não em teoria:**
+
+- PR #5 (`fix/commitlint-dependabot` → `development`): os sete jobs verdes, incluindo
+  `guard-main-source`, que passa porque não é um PR para a `main`.
+- PR #6 (a mesma branch → `main`): `guard-main-source` falha com
+  _"main only accepts pull requests from development"_, e o GitHub reporta
+  `mergeable: MERGEABLE, mergeStateStatus: BLOCKED` — ou seja, o bloqueio veio do status check
+  obrigatório, não de um conflito de merge.
+- PR `development` → `main`: passa.
+
+Um detalhe que confunde e não é defeito: abrir dois PRs a partir da **mesma** branch para bases
+diferentes faz o `gh pr checks` mostrar a união dos check runs, porque eles pertencem ao commit e
+não ao PR. Os dois runs de CI são distintos e corretos (`32422933094` verde, `32422945044`
+vermelho); só a exibição agrega. No uso normal uma branch tem uma base só.
+
+**Achado do primeiro dia de pipeline.** Os três PRs do Dependabot reprovaram no `commitlint`: o
+subject dele é `Bump @eslint/js from 9.39.5 to 10.0.1`, sentence-case, que a regra `subject-case`
+rejeita — e o Dependabot só deixa configurar o prefixo de tipo, nunca o subject. Corrigido com um
+`ignores` por trailer `Signed-off-by: dependabot[bot]`, não pela palavra "Bump": um humano pode
+legitimamente escrever "Bump", e só o bot produz aquele trailer. Separadamente, o PR que sobe
+`typescript` para 7 reprova em `npm ci` por incompatibilidade de peer com `ts-jest@29` — esse é o
+pipeline funcionando, não um defeito dele.
+
 ---
 
 ## Fase 6 — Documentação
@@ -406,6 +445,14 @@ Via `gh api` (funciona após a Fase 0 tornar o repo público):
 - **`CLAUDE.md`** — atualizar: os caminhos `test/prisma.e2e-spec.ts` (citado duas vezes como guarda
   de regressão do Prisma 7) para `test/integration/prisma-wiring.int-spec.ts`; a lista de comandos
   com os novos scripts; e a nota sobre os três níveis e o `.env.test`.
+
+**Como saiu.** Como planejado, mais duas seções no `CLAUDE.md` que o plano não previa e que a
+execução mostrou serem necessárias: **Three test tiers** (a tabela dos três níveis, o porquê do
+`rootDir` compartilhado e das configs em `.js`, e o `.env.test` como única coisa que mantém as
+suítes fora do banco de desenvolvimento) e **CI and branch flow** — sem ela, um agente que não
+souber do `guard-main-source` gasta um PR inteiro para descobrir que a `main` recusa a branch dele.
+
+O `ROTEIRO_TESTS.md` ganhou o cabeçalho e o corpo ficou intacto, como previsto.
 
 ---
 

@@ -1,3 +1,20 @@
+> **Documento histórico — não é a fonte de verdade.**
+>
+> Este é o roteiro original de CI/CD e testes, preservado como registro da visão que deu origem
+> ao trabalho. Ele **não** foi reescrito à medida que a implementação avançou, e diverge deste
+> repositório em oito pontos concretos.
+>
+> - O que foi de fato implementado, item a item: [`CHECKLIST_TESTS_CICD.md`](./CHECKLIST_TESTS_CICD.md)
+> - O porquê de cada decisão, as notas de **Como saiu** por fase e a **tabela de correções** que
+>   lista onde este roteiro diverge da realidade: [`PLANO_TESTS_CICD.md`](./PLANO_TESTS_CICD.md)
+>
+> As divergências maiores, em resumo: a branch principal é a `development` e não a `main`; o
+> `services:` do GitHub Actions não serve aqui porque não sobrescreve o `command` do Redis; o Snyk
+> foi descartado por ser redundante com o Dependabot; e os testes de banco exigem
+> `node --experimental-vm-modules` por causa do Prisma 7.
+
+---
+
 Com certeza. Ajustar a documentação para refletir com exatidão as ferramentas que serão utilizadas é fundamental. Sendo o NexusOps um projeto com foco em excelência técnica, ter a clareza de que o **Supertest** atua na camada HTTP integrada ao Jest faz toda a diferença.
 
 Aqui está o roteiro de CI/CD e testes refatorado, agora explicitando o papel exato do combo Jest + Supertest na sua infraestrutura.

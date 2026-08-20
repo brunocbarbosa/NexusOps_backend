@@ -184,23 +184,45 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 5 — Proteção de branch
 
-- [ ] Ruleset `main-protected` — exige PR (0 aprovações, dev solo), status checks
-      `quality` / `test` / `guard-main-source`, bloqueia force-push e deleção
-- [ ] Ruleset `development-protected` — status checks `quality` / `test`, bloqueia force-push
-      e deleção, sem exigência de PR
-- [ ] **Verificação:** PR de branch qualquer → `development` passa; PR de branch qualquer →
-      `main` é bloqueado pelo `guard-main-source`; PR `development` → `main` passa
+- [x] Ruleset `main-protected` (id `21113502`) — exige PR (0 aprovações, dev solo),
+      `dismiss_stale_reviews_on_push`, status checks `quality` / `test` / `guard-main-source`,
+      bloqueia force-push e deleção, `bypass_actors: []`
+- [x] Ruleset `development-protected` (id `21113511`) — **exige PR** com status checks
+      `quality` / `test`, bloqueia force-push e deleção, `bypass_actors: []`
+- [x] Ambos com `strict_required_status_checks_policy: false` — exigir a branch atualizada
+      transformaria cada merge numa rebase de todos os PRs abertos do Dependabot
+
+> **Desvio decidido com o usuário.** O plano pedia, para a `development`, status checks
+> obrigatórios **e** commit direto liberado. Os dois não coexistem: no GitHub, exigir status check
+> bloqueia também o push direto, porque o commit chega sem check e é rejeitado. Escolhido exigir
+> PR e checks nas duas branches — é o que cumpre o critério de aceite ("um PR com teste quebrado
+> não pode ser mergeado em nenhuma das duas"). Consequência prática: todo trabalho passa a sair de
+> uma branch de feature, e nem o admin escapa (`bypass_actors` vazio).
+
+### Verificação
+
+- [x] PR de branch qualquer → `development` (#5): CI verde nos sete jobs, incluindo
+      `guard-main-source` passando (não é PR para a `main`)
+- [x] PR de branch qualquer → `main` (#6): `guard-main-source` falha com
+      _"main only accepts pull requests from development"_ e o GitHub reporta
+      `mergeStateStatus: BLOCKED`
+- [x] PR `development` → `main` passa
 
 ---
 
 ## Fase 6 — Documentação
 
-- [ ] `documents/ROTEIRO_TESTS.md` — cabeçalho apontando para este checklist e para a tabela
+- [x] `documents/ROTEIRO_TESTS.md` — cabeçalho apontando para este checklist e para a tabela
       de correções (corpo original preservado como registro da visão)
-- [ ] `CLAUDE.md` — caminho `test/prisma.e2e-spec.ts` (citado 2× como guarda de regressão do
+- [x] `CLAUDE.md` — caminho `test/prisma.e2e-spec.ts` (citado 2× como guarda de regressão do
       Prisma 7) atualizado para `test/integration/prisma-wiring.int-spec.ts`
-- [ ] `CLAUDE.md` — seção de comandos com os novos scripts
-- [ ] `CLAUDE.md` — nota sobre os três níveis de teste e o `.env.test`
+- [x] `CLAUDE.md` — seção de comandos com os novos scripts (`test:unit` / `test:int` /
+      `test:all`, `infra:test:*`, `test:setup`, `format:check`)
+- [x] `CLAUDE.md` — seção **Three test tiers**: a tabela dos três níveis, o porquê do `rootDir`
+      compartilhado e das configs em `.js`, e o `.env.test` como única coisa que mantém as suítes
+      fora do banco de desenvolvimento
+- [x] `CLAUDE.md` — seção **CI and branch flow** (extra, não prevista no plano): um agente que
+      não souber do `guard-main-source` desperdiça um PR descobrindo
 
 ---
 
@@ -211,6 +233,8 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 - [ ] Definir as variáveis de repositório `SONAR_ENABLED=true`, `SONAR_PROJECT_KEY` e
       `SONAR_ORGANIZATION` — o job lê as três de `vars`, nada está fixo no workflow
 - [ ] Habilitar _Dependabot alerts_ e _security updates_ em _Settings → Code security_
+- [ ] Decidir o destino do PR #2 (`typescript@7`): reprovado por incompatibilidade real de peer
+      com `ts-jest@29`, não por defeito do pipeline. Fica vermelho até o ts-jest suportar TS 7
 
 ---
 
