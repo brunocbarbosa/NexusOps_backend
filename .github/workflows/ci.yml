@@ -212,7 +212,15 @@ jobs:
   # ---------------------------------------------------------------------------
   sonar:
     name: sonar
-    if: vars.SONAR_ENABLED == 'true'
+    # O segundo termo não é preferência: PRs do Dependabot não recebem os secrets
+    # normais do Actions — rodam contra um cofre separado (Dependabot secrets) —
+    # então `secrets.SONAR_TOKEN` chega vazio e o scanner morre com
+    # "Not authorized or project not found". As `vars` chegam, o que torna a
+    # falha confusa: o job roda porque SONAR_ENABLED está lá, e falha porque o
+    # token não está. Duplicar o token no outro cofre resolveria, mas analisar um
+    # bump de lockfile no Sonar não agrega nada que justifique espalhar a
+    # credencial.
+    if: vars.SONAR_ENABLED == 'true' && github.actor != 'dependabot[bot]'
     needs: [test]
     runs-on: ubuntu-latest
     steps:

@@ -371,6 +371,23 @@ ele se auto-sabota: `target-branch: development` (um PR do Dependabot para a `ma
 pelo próprio `guard-main-source`) e `commit-message.prefix` (`build` para npm, `ci` para actions),
 senão todo PR dele reprova no job de `commitlint`.
 
+**Mais dois defeitos, encontrados depois que os PRs do Dependabot começaram a chegar de verdade:**
+
+1. **O job `sonar` não pode funcionar num PR do Dependabot.** Esses PRs não recebem os secrets
+   normais do Actions — rodam contra um cofre separado (_Dependabot secrets_) — então
+   `secrets.SONAR_TOKEN` chega vazio e o scanner morre com "Not authorized or project not found".
+   As `vars` chegam, o que torna a falha especialmente confusa: o job roda porque `SONAR_ENABLED`
+   está lá e falha porque o token não está. A condição do job ganhou
+   `&& github.actor != 'dependabot[bot]'`. Duplicar o token no outro cofre resolveria, mas analisar
+   um bump de lockfile no Sonar não agrega nada que justifique espalhar a credencial.
+2. **O agrupamento do Dependabot se auto-sabotava de duas formas.** `typescript` estava no grupo
+   `types-and-linting`, então um membro inviável trava os outros para sempre — enquanto o
+   `ts-jest@29` não aceitar TS 7, `eslint` e `@types/node` não conseguem se mover. E o padrão
+   `eslint*` **não casa** com `@eslint/js`, porque o nome começa por `@`: ele saía num PR solto
+   propondo justamente a dessincronização de major com o `eslint`. Corrigido com `ignore` de major
+   para `typescript` e `@types/node` (este último acompanha o Node que o projeto realmente roda) e
+   com `@eslint/*` explícito no grupo.
+
 **Verificado localmente antes do push:** `actionlint` limpo nos dois workflows; o job `quality`
 inteiro (`eslint` sem `--fix`, `format:check`, `tsc --noEmit`); o job `test` inteiro
 (`test:setup` + os três níveis: 3 unit, 20 integration, 2 e2e); `npm audit --audit-level=high`
