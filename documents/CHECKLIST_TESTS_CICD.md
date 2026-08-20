@@ -245,8 +245,15 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
       severidade **high**, e foi o primeiro alerta que o Dependabot levantou assim que foi
       ligado. Vale registrar por que o job `audit` não pegava: `npm audit` só enxerga pacotes
       npm, e isto é uma GitHub Action. Os dois se complementam, não se sobrepõem
-- [ ] Decidir o destino do PR #2 (`typescript@7`): reprovado por incompatibilidade real de peer
-      com `ts-jest@29`, não por defeito do pipeline. Fica vermelho até o ts-jest suportar TS 7
+- [ ] Fechar os PRs #2 e #3 do Dependabot. Nenhum dos dois é mesclável, e ambos deixam de ser
+      propostos depois da correção do `dependabot.yml`: - **#2** empacota três majors não relacionadas, e uma é inviável — `typescript` ^5.7.3 →
+      ^7.0.2 quebra o `npm ci` porque o peer do `ts-jest@29` não aceita. Junto vinha
+      `@types/node` ^24 → ^26, errado por si só: o runtime é Node 24 - **#3** sobe `@eslint/js` para 10 deixando o `eslint` em 9 — mesmo projeto, majors
+      dessincronizadas
+- [ ] Mesclar o PR #4 (bump de 10 actions) depois de um rebase. O conteúdo é desejável:
+      `codeql-action` v3 → v4 (a v3 é descontinuada em dezembro/2026) e
+      `checkout`/`setup-node`/`artifact` para as majors atuais, que limpam o aviso de Node 20 em
+      toda execução
 
 ### Verificação da integração com o SonarCloud
 
