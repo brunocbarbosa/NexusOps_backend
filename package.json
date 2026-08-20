@@ -33,7 +33,8 @@
     "test:all": "npm run test:unit && npm run test:int && npm run test:e2e",
     "infra:test:up": "docker compose -f docker-compose.test.yml up -d --wait",
     "infra:test:down": "docker compose -f docker-compose.test.yml down -v",
-    "test:setup": "npm run infra:test:up && DOTENV_CONFIG_PATH=.env.test npx prisma migrate deploy"
+    "test:setup": "npm run infra:test:up && DOTENV_CONFIG_PATH=.env.test npx prisma migrate deploy",
+    "docker:build": "docker build -t nexusops-backend:local ."
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.5",

@@ -98,17 +98,32 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 > O ambiente efêmero (`docker-compose.test.yml`, `.env.test`, scripts `infra:test:*`) foi
 > antecipado para a Fase 2: sem banco não havia como verificar os três níveis de teste.
 
-- [ ] **Correção do build:** `rootDir: "./src"` e `exclude: ["prisma.config.ts"]` em
+- [x] **Correção do build:** `rootDir: "./src"` e `exclude: ["prisma.config.ts"]` em
       `tsconfig.build.json` — hoje `nest build` emite `dist/src/main.js` e `start:prod`
       (`node dist/main`) está quebrado
-- [ ] `Dockerfile` multi-stage (builder: `npm ci` → `prisma generate` → `build`;
+- [x] `Dockerfile` multi-stage (builder: `npm ci` → `prisma generate` → `build`;
       runner: `npm ci --omit=dev`, `dist/` + `prisma/`, usuário não-root)
-- [ ] `.dockerignore`
+- [x] `.dockerignore`
+- [x] **Poda do runtime:** `prisma` e `typescript` são _optional peers_ de
+      `@prisma/client@7` e sobrevivem a `--omit=dev` **e** a `--omit=peer`, arrastando
+      Prisma Studio (`effect`, `@electric-sql`, `react-dom`, `elkjs`) e as engines
+      binárias legadas. Removidos explicitamente, junto dos compiladores WASM de todos
+      os providers exceto PostgreSQL: **778MB → 406MB**
+- [x] `scripts/docker-smoke.js` embutido na imagem — instancia o cliente e roda
+      `$queryRaw` + `tenant.count()`. É o que impede a poda de virar uma alegação não
+      verificada: os arquivos removidos carregam sob demanda, então uma poda errada só
+      aparece na primeira query real, nunca no boot
+- [x] **`tsBuildInfoFile` fixado dentro de `dist/`** — efeito colateral do `rootDir`:
+      o tsc passou a gravar o cache incremental na raiz, fora do que o `deleteOutDir`
+      limpa. Um build limpo emitia zero arquivos e saía com código 0
 
 ### Verificação
 
-- [ ] `npm run build && test -f dist/main.js` e `node dist/main` sobe na porta 3000
-- [ ] `docker build -t nexusops-backend:local .` e o container responde em `curl localhost:3000`
+- [x] `npm run build && test -f dist/main.js` e `node dist/main` sobe na porta 3000
+- [x] `docker build -t nexusops-backend:local .` e o container responde em `curl localhost:3000`
+- [x] Container roda como `uid=1000(node)`, não root
+- [x] `docker build --no-cache` reproduz os 406MB e o smoke do Prisma passa
+- [x] Três builds limpos seguidos emitem `dist/main.js` (guarda do bug do `.tsbuildinfo`)
 
 ---
 
