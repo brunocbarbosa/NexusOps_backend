@@ -1,0 +1,59 @@
+# Atualizações automáticas de dependências.
+#
+# Complementa, não substitui, o job `audit` do ci.yml: o Dependabot abre PR mas
+# não reprova build nenhum, e o `npm audit --audit-level=high` reprova. Um pega
+# o que ainda não foi corrigido, o outro traz a correção.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    # PR vai para a development, nunca para a main: `main` só recebe da
+    # development, e o job guard-main-source reprovaria qualquer outra origem.
+    target-branch: development
+    commit-message:
+      # Casa com o commitlint (config-conventional): sem isto, todo PR do
+      # Dependabot reprova no job de commitlint.
+      prefix: build
+      prefix-development: chore
+      include: scope
+    groups:
+      # Um PR por ecossistema em vez de um por pacote. As dependências do Nest
+      # sobem em conjunto e revisá-las em sete PRs separados é ruído.
+      nestjs:
+        patterns: ['@nestjs/*']
+      prisma:
+        patterns: ['prisma', '@prisma/*']
+      types-and-linting:
+        patterns:
+          [
+            '@types/*',
+            'eslint*',
+            'typescript-eslint',
+            'prettier*',
+            'typescript',
+          ]
+      jest:
+        patterns:
+          ['jest', 'ts-jest', '@types/jest', 'supertest', '@types/supertest']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    target-branch: development
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ['*']

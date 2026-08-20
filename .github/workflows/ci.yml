@@ -1,0 +1,362 @@
+# Pipeline principal. Roda em PR e em push para as duas branches de longa duração.
+#
+# `development` é a branch principal deste repositório: é dela que sai todo o
+# trabalho e é ela — e só ela — que abre PR para `main`. O gatilho cobre as duas
+# porque um push direto para `development` é permitido (ver o ruleset da Fase 5),
+# e um push que ninguém verifica não protege nada.
+name: CI
+
+on:
+  pull_request:
+    branches: [development, main]
+  push:
+    branches: [development, main]
+
+# Um push novo na mesma branch torna a execução anterior irrelevante. Sem isto,
+# uma sequência rápida de commits enfileira builds que ninguém vai ler.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Padrão restritivo; os jobs que precisam de mais (docker → packages: write)
+# elevam localmente.
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Os rulesets do GitHub sabem exigir PR, mas não sabem restringir a branch de
+  # *origem* dele. Este job é a única imposição real de "main só recebe da
+  # development" — sem ele, qualquer branch pode abrir PR para a main e o
+  # ruleset aprova.
+  #
+  # Roda sempre, em vez de com `if:` no nível do job, para publicar uma
+  # conclusão de verdade em toda execução: um job pulado aparece como neutro no
+  # status check obrigatório, e a diferença entre "passou" e "nem rodou" é
+  # exatamente o que não se quer ambíguo num guard.
+  # ---------------------------------------------------------------------------
+  guard-main-source:
+    name: guard-main-source
+    runs-on: ubuntu-latest
+    steps:
+      - name: main only accepts pull requests from development
+        # Via env, não interpolado direto no script: `head_ref` é escolhido por
+        # quem abre o PR, e um nome de branch com `$(...)` executaria no runner.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "main" ]; then
+            echo "Não é um PR para a main — nada a impor aqui."
+            exit 0
+          fi
+          if [ "$HEAD_REF" != "development" ]; then
+            echo "::error::A main só aceita PR vindo da development; este veio de '$HEAD_REF'."
+            exit 1
+          fi
+          echo "OK: PR de development para main."
+
+  # ---------------------------------------------------------------------------
+  # O hook local de commit-msg cai com um `git commit --no-verify`. Aqui não cai.
+  # ---------------------------------------------------------------------------
+  commitlint:
+    name: commitlint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # commitlint compara um intervalo de commits; um checkout raso não tem
+          # o ancestral comum para calcular esse intervalo.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Sem `prisma generate`: o commitlint lê mensagens de commit, não compila
+      # TypeScript. Gerar o client aqui seriam ~20s por execução sem nenhum uso.
+      - run: npm ci
+
+      - name: Validar as mensagens de commit do PR
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          npx commitlint --from "origin/$BASE_REF" --to HEAD --verbose
+
+  # ---------------------------------------------------------------------------
+  # Lint, formatação e tipos. É um dos status checks obrigatórios das duas
+  # branches (Fase 5), então o nome do job é contrato — renomear quebra a
+  # proteção em silêncio.
+  # ---------------------------------------------------------------------------
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # `src/generated/prisma` é gitignored. Sem este passo o tsc não resolve os
+      # imports do client e o job falha por um motivo que não é o código do PR.
+      - name: Gerar o Prisma Client
+        run: npm run prisma:generate
+
+      # Sem `--fix`: o script `npm run lint` reescreve arquivos, o que numa CI
+      # apenas esconde o problema em vez de reprovar.
+      - name: ESLint (somente leitura)
+        run: npx eslint "{src,test}/**/*.ts"
+
+      - name: Prettier
+        run: npm run format:check
+
+      # tsconfig.build.json, não o tsconfig raiz: é a configuração com que a
+      # imagem de produção é compilada. Os arquivos de `test/` são checados pelo
+      # ts-jest durante a própria suíte.
+      - name: TypeScript
+        run: npx tsc --noEmit -p tsconfig.build.json
+
+  # ---------------------------------------------------------------------------
+  # Os três níveis contra o mesmo ambiente efêmero que roda localmente.
+  #
+  # `docker compose` em vez do `services:` do Actions: `services:` não sabe
+  # sobrescrever o `command` de um container, e o Redis aqui *precisa* subir com
+  # `--maxmemory-policy noeviction` (CLAUDE.md). Um arquivo de compose único
+  # para os dois ambientes é o que impede que eles divirjam.
+  # ---------------------------------------------------------------------------
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Gerar o Prisma Client
+        run: npm run prisma:generate
+
+      # O mesmo script que a documentação manda rodar localmente: sobe o compose
+      # de teste com `--wait` e aplica as migrations com o .env.test.
+      - name: Subir o banco efêmero e aplicar as migrations
+        run: npm run test:setup
+
+      - name: Testes unitários
+        run: npm run test:unit -- --coverage
+
+      - name: Testes de integração
+        run: npm run test:int
+
+      - name: Testes e2e
+        run: npm run test:e2e
+
+      - name: Publicar a cobertura
+        # `always()` para que a cobertura de uma execução que falhou continue
+        # disponível — é justamente quando ela é útil.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+          # `warn`, não `error`: com `always()` este passo também roda quando o
+          # job falhou antes de qualquer teste rodar, e aí a ausência de
+          # cobertura é consequência, não uma segunda falha a investigar.
+          if-no-files-found: warn
+
+      - name: Derrubar o banco efêmero
+        if: always()
+        run: npm run infra:test:down
+
+  # ---------------------------------------------------------------------------
+  # Complementa o Dependabot: ele abre PR, mas não reprova build nenhum. Aqui
+  # uma vulnerabilidade alta para a merge.
+  # ---------------------------------------------------------------------------
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm audit` resolve a árvore a partir do package-lock.json; não precisa
+      # de node_modules nem do Prisma Client.
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+  # ---------------------------------------------------------------------------
+  # Escrito e desligado. Liga sozinho quando a variável de repositório
+  # SONAR_ENABLED for definida como 'true' (ver "Passos manuais" no checklist).
+  #
+  # `vars` e não `secrets` na condição: o contexto `secrets` não é avaliável em
+  # `if:` de job, então condicionar a existência do token não funcionaria.
+  # ---------------------------------------------------------------------------
+  sonar:
+    name: sonar
+    if: vars.SONAR_ENABLED == 'true'
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # O Sonar usa o histórico para atribuir issues a autores e para
+          # calcular o "new code" de um PR.
+          fetch-depth: 0
+
+      - name: Baixar a cobertura do job de teste
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+      - uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.sources=src
+            -Dsonar.tests=test
+            -Dsonar.exclusions=src/generated/**
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+  # ---------------------------------------------------------------------------
+  # Build em todo PR (o Dockerfile é código e quebra como código); push só em
+  # push na main.
+  # ---------------------------------------------------------------------------
+  docker:
+    name: docker
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Só para ter a CLI do Prisma e aplicar as migrations no banco contra o
+      # qual o smoke test da imagem roda. A imagem não carrega a CLI.
+      - run: npm ci
+
+      - name: Subir o banco efêmero e aplicar as migrations
+        run: npm run test:setup
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Calcular as tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Literal em minúsculas de propósito: o GHCR rejeita maiúsculas e
+          # `github.repository` é "brunocbarbosa/NexusOps_backend".
+          images: ghcr.io/brunocbarbosa/nexusops_backend
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      # `load: true` e sem `push:`. A imagem tem que existir no daemon local
+      # para os dois testes abaixo, e publicar antes de testar seria publicar no
+      # escuro. O push acontece depois, sobre estas mesmas tags já construídas.
+      - name: Build da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Guarda do defeito do .tsbuildinfo (Fase 3): um cache incremental fora do
+      # que o `deleteOutDir` limpa faz um build limpo emitir zero arquivos e sair
+      # com código 0. O `COPY` de um dist/ vazio não falha, então a imagem só
+      # se denuncia ao tentar subir.
+      - name: A imagem sobe e responde HTTP
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Qualquer uma das tags aponta para a mesma imagem; a primeira linha
+          # basta e não depende da ordem de prioridade do metadata-action.
+          IMAGE_REF="$(echo "$TAGS" | head -n1)"
+          docker run -d --rm --name nexusops-boot -p 3000:3000 "$IMAGE_REF"
+          for i in $(seq 1 30); do
+            if curl -fsS localhost:3000 > /dev/null; then
+              echo "OK: a imagem respondeu em $i tentativa(s)."
+              docker stop nexusops-boot
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::A imagem não respondeu na porta 3000 em 30s."
+          docker logs nexusops-boot
+          docker stop nexusops-boot
+          exit 1
+
+      # O Dockerfile remove a CLI do Prisma, o Studio, as engines legadas e todo
+      # query compiler que não seja o de PostgreSQL. Tudo isso carrega sob
+      # demanda: uma poda errada não aparece no boot, só na primeira query real.
+      # Este passo é o que impede a poda de virar uma alegação não verificada.
+      - name: Smoke test do Prisma dentro da imagem
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="$(echo "$TAGS" | head -n1)"
+          # Uma fonte de verdade para a URL: o mesmo .env.test que a suíte usa.
+          # `set -a` exporta e o shell tira as aspas — `--env-file` do docker as
+          # passaria literalmente para dentro da variável.
+          set -a
+          . ./.env.test
+          set +a
+          docker run --rm --network host \
+            -e DATABASE_URL="$DATABASE_URL" \
+            "$IMAGE_REF" \
+            node scripts/docker-smoke.js
+
+      - name: Login no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `docker push` direto em vez de um segundo build-push-action: a imagem já
+      # está construída e testada, e reconstruí-la para publicar significaria
+      # publicar um artefato que não é bit a bit o que passou nos testes acima.
+      - name: Publicar no GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          echo "$TAGS" | xargs -rn1 docker push
+
+      - name: Derrubar o banco efêmero
+        if: always()
+        run: npm run infra:test:down

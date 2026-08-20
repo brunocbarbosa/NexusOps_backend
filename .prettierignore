@@ -1,0 +1,18 @@
+# Vendored, version-pinned Prisma reference docs installed by `prisma init` and
+# tracked by skills-lock.json. They are upstream content, not project source:
+# reformatting them would make every skills upgrade a merge conflict.
+# .claude/ and .windsurf/ are symlink farms pointing into .agents/ (see CLAUDE.md).
+.agents/
+.claude/
+.windsurf/
+
+# Generated or build output — nothing here is authored.
+src/generated/
+dist/
+coverage/
+package-lock.json
+
+# Prisma owns the formatting of these (`prisma format`), and its style does not
+# match Prettier's.
+prisma/schema.prisma
+prisma/migrations/

@@ -78,7 +78,7 @@ Prisma 7 is a sharp break from v6 and three separate things must all be right, o
 touching any of them.
 
 1. **A driver adapter is mandatory** for SQL providers. `new PrismaClient()` with no arguments is a
-   *compile-time* error in v7 ("Expected 1 arguments, but got 0"). The client must be constructed as:
+   _compile-time_ error in v7 ("Expected 1 arguments, but got 0"). The client must be constructed as:
 
    ```ts
    import { PrismaPg } from '@prisma/adapter-pg';
@@ -137,14 +137,14 @@ depends on all five:
   that another tenant's resource exists.
 - **`PrismaPromise` is lazy, and that will eat your context.** The query is dispatched when the
   promise is awaited, not when the method is called. So `als.run(store, () => prisma.x.findMany())`
-  dispatches *outside* the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
+  dispatches _outside_ the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
   `storage.run`; do not "simplify" it back to a synchronous wrapper. Symptom when this regresses:
   `TenantContextMissingError` from code that visibly established a tenant.
 - **Query extensions never fire for nested access.** `include: {}` intercepts only the parent
   operation, and so does a nested `create`. The extension cannot filter a nested read or fix a
   nested child's `tenantId`.
 - **That hole is closed in the schema, not in the extension.** Child relations use composite foreign
-  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input *without*
+  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input _without_
   a `tenantId` field, so the wrong tenant stops being expressible, and a cross-tenant child cannot
   exist for a nested read to return. Cost: the two optional relations lose `ON DELETE SET NULL` and
   become `RESTRICT`, because part of a composite key cannot be nulled while `tenant_id` is
@@ -171,7 +171,7 @@ mechanisms, and the second is the one that bites — both measured against this 
 not taken from documentation:
 
 - The **table owner** bypasses RLS. `ALTER TABLE ... FORCE ROW LEVEL SECURITY` fixes that case.
-- A **superuser** bypasses RLS unconditionally, and `FORCE` does *not* help. `docker-compose.yml`
+- A **superuser** bypasses RLS unconditionally, and `FORCE` does _not_ help. `docker-compose.yml`
   sets `POSTGRES_USER=nexusops`, and `initdb` makes that role a superuser: `pg_roles` reports
   `rolsuper = t, rolbypassrls = t`. So with the default `DATABASE_URL`, every policy is dead
   weight while `pg_policies` still shows the setup as correct — a silent failure that looks like
@@ -190,7 +190,7 @@ a `NOSUPERUSER NOBYPASSRLS` non-owner it returned only the scoped rows, and zero
 2. `@prisma/adapter-pg` sends any query outside `$transaction()` straight to the `pg.Pool`, one
    checkout per call, so a standalone `set_config` and the following query can land on different
    physical connections — and a session-scoped value lingers on whichever connection last set it.
-   Under concurrency that yields *another single tenant's* rows, intermittently. Measured on a pool
+   Under concurrency that yields _another single tenant's_ rows, intermittently. Measured on a pool
    of 4 with 60 concurrent requests: 46 of 60 observed the wrong tenant. Pinning one connection per
    request and using transaction-local scope brought it to 0 of 60.
 

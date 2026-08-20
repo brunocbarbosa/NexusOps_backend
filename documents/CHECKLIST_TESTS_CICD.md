@@ -132,21 +132,53 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 4 — Pipeline GitHub Actions
 
-- [ ] `.github/workflows/ci.yml` com gatilho em PR **e** push para `development` e `main`
-- [ ] Todos os jobs rodam `npm ci` + **`npm run prisma:generate`** antes de qualquer outra coisa
-      (`src/generated/prisma` é gitignored — sem isso nada compila)
-- [ ] Job `guard-main-source` — falha PR para `main` vindo de branch != `development`
-      (rulesets do GitHub não restringem a branch de origem; este job é a única imposição real)
-- [ ] Job `commitlint` — valida os commits do PR (o hook local é burlável com `--no-verify`)
-- [ ] Job `quality` — `eslint` sem `--fix`, `prettier --check`, `tsc --noEmit`
-- [ ] Job `test` — sobe `docker-compose.test.yml`, `prisma migrate deploy`, os três níveis,
-      publica `coverage/` como artifact
-- [ ] Job `audit` — `npm audit --audit-level=high`
-- [ ] Job `sonar` — escrito e condicionado a `vars.SONAR_ENABLED == 'true'`
-- [ ] Job `docker` — build em todo PR, `push` só em push na `main`, tags `latest` e `sha-<short>`
-- [ ] `.github/workflows/codeql.yml` — `javascript-typescript`, em PR + semanal
-- [ ] `.github/dependabot.yml` — `npm` e `github-actions`, semanal
-- [ ] `.github/pull_request_template.md`
+- [x] `.github/workflows/ci.yml` com gatilho em PR **e** push para `development` e `main`
+- [x] Os jobs que compilam (`quality`, `test`) rodam `npm ci` + **`npm run prisma:generate`**
+      antes de qualquer outra coisa (`src/generated/prisma` é gitignored — sem isso nada
+      compila). `guard-main-source`, `commitlint`, `audit` e `docker` não compilam e não
+      geram o client
+- [x] Job `guard-main-source` — falha PR para `main` vindo de branch != `development`
+      (rulesets do GitHub não restringem a branch de origem; este job é a única imposição real).
+      Roda sempre, sem `if:` no nível do job, para publicar uma conclusão real em toda execução
+- [x] Job `commitlint` — valida os commits do PR (o hook local é burlável com `--no-verify`)
+- [x] Job `quality` — `eslint` sem `--fix`, `prettier --check`, `tsc --noEmit`
+- [x] Job `test` — sobe `docker-compose.test.yml` via `npm run test:setup`, aplica as
+      migrations, roda os três níveis, publica `coverage/` como artifact
+- [x] Job `audit` — `npm audit --audit-level=high`
+- [x] Job `sonar` — escrito e condicionado a `vars.SONAR_ENABLED == 'true'`
+- [x] Job `docker` — build em todo PR, `push` só em push na `main`, tags `latest` e `sha-<short>`
+- [x] Job `docker` — a imagem sobe e responde em `localhost:3000` (guarda do bug do
+      `.tsbuildinfo`: um `dist/` vazio passa pelo `COPY` sem erro) e o
+      `scripts/docker-smoke.js` roda contra um banco vivo (guarda da poda do Prisma)
+- [x] `.github/workflows/codeql.yml` — `javascript-typescript`, em PR + push + semanal
+- [x] `.github/dependabot.yml` — `npm` e `github-actions`, semanal, apontando para a
+      `development` e com prefixos de commit que passam no commitlint
+- [x] `.github/pull_request_template.md`
+
+### Correções de base exigidas pelo job `quality`
+
+- [x] `.prettierignore` — as skills vendorizadas do Prisma (`.agents/`, e os symlinks
+      `.claude/` e `.windsurf/`), `src/generated/`, `dist/`, `coverage/`, `package-lock.json`
+      e os arquivos que o `prisma format` governa. Sem isso o `prettier --check` reprovava em
+      66 arquivos que não são deste projeto
+- [x] `prettier --write` nos 6 arquivos do projeto que reprovavam (`CLAUDE.md`, `README.md`,
+      `documents/MAIN.md`, `documents/DATABASE_MODEL.md`, `prisma.config.ts`,
+      `eslint.config.mjs` e o spec em `docs/`)
+- [x] Scripts `format` (`prettier --write .`) e `format:check` (`prettier --check .`) — o
+      `format` antigo cobria só `src/` e `test/`, então nunca teria detectado o que a CI detecta
+
+### Verificação
+
+- [x] `actionlint` sem erros nos dois workflows
+- [x] `npx eslint "{src,test}/**/*.ts"`, `npm run format:check` e
+      `npx tsc --noEmit -p tsconfig.build.json` verdes (o job `quality` inteiro, local)
+- [x] `npm run test:setup` + os três níveis verdes (o job `test` inteiro, local)
+- [x] `npm audit --audit-level=high` → `found 0 vulnerabilities`
+- [x] `npx commitlint --from <ref> --to HEAD --verbose` → `0 problems`
+- [x] Passos do job `docker` rodados localmente: boot + `curl localhost:3000` → `Hello World!`
+      e `docker run ... node scripts/docker-smoke.js` → `raw=1, tenant.count=0`
+- [ ] **Pendente do PR:** confirmar os jobs verdes numa execução real do GitHub Actions
+      (só observável depois do push — fecha junto com a Fase 5)
 
 ---
 
@@ -176,7 +208,8 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 - [ ] Criar conta no SonarCloud e vincular o repositório
 - [ ] Cadastrar `SONAR_TOKEN` em _Settings → Secrets and variables → Actions → Secrets_
-- [ ] Definir a variável de repositório `SONAR_ENABLED=true` para ligar o job
+- [ ] Definir as variáveis de repositório `SONAR_ENABLED=true`, `SONAR_PROJECT_KEY` e
+      `SONAR_ORGANIZATION` — o job lê as três de `vars`, nada está fixo no workflow
 - [ ] Habilitar _Dependabot alerts_ e _security updates_ em _Settings → Code security_
 
 ---

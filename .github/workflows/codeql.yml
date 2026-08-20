@@ -1,0 +1,52 @@
+# Análise estática de segurança nativa do GitHub. Gratuita neste repositório
+# porque a Fase 0 o tornou público.
+#
+# Separada do ci.yml de propósito: o CodeQL tem o próprio agendamento semanal e
+# a própria permissão (`security-events: write`), e misturá-lo ao pipeline
+# obrigaria o ci.yml inteiro a carregar essa permissão.
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [development, main]
+  push:
+    branches: [development, main]
+  schedule:
+    # Segunda-feira, 04:12 UTC. O agendamento é o que pega vulnerabilidade nova
+    # em código antigo: uma query publicada depois do merge nunca rodaria contra
+    # um arquivo que ninguém mais toca.
+    - cron: '12 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          # Uma única linguagem: o repositório é TypeScript de ponta a ponta.
+          # `javascript-typescript` cobre as duas — não existe um `typescript`
+          # separado.
+          languages: javascript-typescript
+          queries: security-and-quality
+
+      # Sem passo de build: o CodeQL analisa JavaScript/TypeScript direto do
+      # código-fonte. Compilar seria trabalho jogado fora, e `src/generated/`
+      # (gitignored) nem chega ao checkout.
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript-typescript'

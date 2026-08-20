@@ -10,7 +10,7 @@
 > | 1 — Husky + Commitlint + lint-staged  | ✅ concluída | `62a811f` |
 > | 2 — Três níveis de teste              | ✅ concluída | `7ac02e6` |
 > | 3 — Build de produção e imagem Docker | ✅ concluída | `2830bee` |
-> | 4 — Pipeline GitHub Actions           | ⬜ pendente  | —         |
+> | 4 — Pipeline GitHub Actions           | ✅ concluída | `4672b6b` |
 > | 5 — Proteção de branch                | ⬜ pendente  | —         |
 > | 6 — Documentação                      | ⬜ pendente  | —         |
 >
@@ -335,6 +335,49 @@ on:
   em PR + agendamento semanal.
 - `.github/dependabot.yml` — ecossistemas `npm` e `github-actions`, semanal.
 - `.github/pull_request_template.md` — checklist curto de PR.
+
+**Como saiu.** Os sete jobs e os três arquivos auxiliares saíram como planejado. Quatro desvios,
+todos por um motivo específico:
+
+1. **`prisma generate` só nos jobs que compilam.** O plano dizia "todos os jobs"; a justificativa
+   real é "`src/generated/prisma` é gitignored e sem ele nada compila", o que só se aplica a
+   `quality` e `test`. `commitlint` lê mensagens de commit, `audit` resolve o `package-lock.json`,
+   `guard-main-source` é um `if` de shell, e o `docker` gera o client dentro da própria imagem.
+   Rodar o generator nos quatro seriam ~80s por execução sem nenhum consumidor.
+2. **`guard-main-source` roda sempre, sem `if:` no nível do job.** Um job pulado publica conclusão
+   _neutra_ no status check obrigatório, e num guard a diferença entre "passou" e "nem rodou" é
+   exatamente o que não pode ser ambíguo. O job roda em toda execução e sai 0 quando não é um PR
+   para a `main`. Pelo mesmo motivo de segurança, `head_ref` chega ao script via `env:` em vez de
+   interpolado: nome de branch é escolhido por quem abre o PR, e `$(...)` num nome executaria no
+   runner.
+3. **O job `docker` ganhou dois testes que o plano não previa**, e o primeiro é o mais importante:
+   a imagem sobe e responde em `localhost:3000`. É a guarda de CI do defeito do `.tsbuildinfo`
+   encontrado na Fase 3 — um `dist/` vazio passa pelo `COPY` do Dockerfile sem erro nenhum, e o
+   smoke do Prisma roda `node scripts/docker-smoke.js`, não `dist/main`, então não pegaria isso.
+   O segundo é o smoke do Prisma, que a Fase 3 já previa.
+   O build usa `load: true` e o push é um `docker push` separado sobre as mesmas tags, em vez de
+   um segundo `build-push-action`: publicar depois de testar, e publicar bit a bit o artefato que
+   foi testado.
+4. **O `prettier --check` do job `quality` exigiu consertar a base antes.** Ele reprovava em 72
+   arquivos. 66 eram as skills vendorizadas do Prisma (`.agents/`, com `.claude/` e `.windsurf/`
+   apontando para lá) — conteúdo upstream, versionado pelo `skills-lock.json`, que reformatado
+   transformaria todo upgrade de skills num conflito de merge. Daí o `.prettierignore`. Os 6
+   restantes eram arquivos do projeto e foram formatados. O script `format` cobria só
+   `src/` e `test/`, ou seja, nunca teria detectado o que a CI detecta; virou `prettier --write .`
+   com um `format:check` simétrico, que é o que o job chama.
+
+O `.github/dependabot.yml` também precisou de duas coisas que o plano não menciona e sem as quais
+ele se auto-sabota: `target-branch: development` (um PR do Dependabot para a `main` seria reprovado
+pelo próprio `guard-main-source`) e `commit-message.prefix` (`build` para npm, `ci` para actions),
+senão todo PR dele reprova no job de `commitlint`.
+
+**Verificado localmente antes do push:** `actionlint` limpo nos dois workflows; o job `quality`
+inteiro (`eslint` sem `--fix`, `format:check`, `tsc --noEmit`); o job `test` inteiro
+(`test:setup` + os três níveis: 3 unit, 20 integration, 2 e2e); `npm audit --audit-level=high`
+com 0 vulnerabilidades; `commitlint` num intervalo real de commits; e os dois passos novos do job
+`docker` contra a imagem local — boot respondendo `Hello World!` e
+`prisma smoke ok: raw=1, tenant.count=0`. O que só é observável depois do push é a execução real
+no GitHub Actions, que fecha junto com a Fase 5.
 
 ---
 
