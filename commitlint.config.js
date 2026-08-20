@@ -40,4 +40,14 @@ module.exports = {
     // Bodies wrap at 80 in this repo; the default 100 would allow drift.
     'body-max-line-length': [2, 'always', 100],
   },
+
+  // Dependabot writes "Bump @eslint/js from 9.39.5 to 10.0.1" and offers no way
+  // to change the subject — only the type prefix is configurable. That subject
+  // is sentence-case, so `subject-case` above rejects every one of its pull
+  // requests, and the CI commitlint job turns red on a commit nobody authored.
+  //
+  // Exempting by the signature rather than by the "Bump" wording: a human could
+  // legitimately write a commit starting with "Bump", and only the bot can
+  // produce this trailer.
+  ignores: [(message) => message.includes('Signed-off-by: dependabot[bot]')],
 };
