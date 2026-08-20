@@ -1,0 +1,49 @@
+# Ephemeral stack for the integration and e2e suites.
+#
+# Deliberately separate from docker-compose.yml: the test suites truncate and
+# reseed, and pointing them at the development database means every test run
+# wipes local data. Different ports, different container names, no volumes.
+#
+# The same file is used by CI. GitHub Actions' `services:` directive cannot
+# override a container's command, and Redis here *must* run with
+# `--maxmemory-policy noeviction` (see CLAUDE.md), so a single compose file for
+# both environments is the only way to keep them from drifting apart.
+
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    container_name: nexusops-postgres-test
+    environment:
+      POSTGRES_USER: nexusops_test
+      POSTGRES_PASSWORD: nexusops_test
+      POSTGRES_DB: nexusops_test
+      # initdb refuses a data directory it did not create with 0700. A tmpfs
+      # mount lands as 1777, so PGDATA points at a subdirectory that initdb
+      # creates itself with the permissions it wants.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - '5433:5432'
+    # No volume: the database lives in RAM and dies with the container. A test
+    # run always starts from a known-empty database.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U nexusops_test -d nexusops_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: nexusops-redis-test
+    # Same policy as the development stack: evicting a BullMQ key mid-flight
+    # corrupts the queue, and a test that hits that would fail for a reason
+    # that has nothing to do with the code under test.
+    command: redis-server --save '' --appendonly no --maxmemory-policy noeviction
+    ports:
+      - '6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20

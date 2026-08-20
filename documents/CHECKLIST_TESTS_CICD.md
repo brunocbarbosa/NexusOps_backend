@@ -39,54 +39,65 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ### Estrutura
 
-- [ ] `test/integration/` e `test/e2e/` e `test/utils/` criados
-- [ ] `test/prisma.e2e-spec.ts` → `test/integration/prisma-wiring.int-spec.ts`
-- [ ] `test/tenant-isolation.e2e-spec.ts` → `test/integration/tenant-isolation.int-spec.ts`
-- [ ] `test/app.e2e-spec.ts` → `test/e2e/app.e2e-spec.ts`
-- [ ] Os dois specs de integração alterados **apenas** no caminho de import — são as regressões
+- [x] `test/integration/` e `test/e2e/` e `test/utils/` criados
+- [x] `test/prisma.e2e-spec.ts` → `test/integration/prisma-wiring.int-spec.ts`
+- [x] `test/tenant-isolation.e2e-spec.ts` → `test/integration/tenant-isolation.int-spec.ts`
+- [x] `test/app.e2e-spec.ts` → `test/e2e/app.e2e-spec.ts`
+- [x] Os dois specs de integração alterados **apenas** no caminho de import — são as regressões
       que travam o design de tenancy
 
 ### Configurações Jest
 
-- [ ] `test/jest-unit.json` — `testMatch: src/**/*.spec.ts`, sem `setupFiles`, roda sem Docker
-- [ ] `test/jest-integration.json` — `testMatch: test/integration/**/*.int-spec.ts`,
+- [x] `test/jest-unit.js` — `testMatch: src/**/*.spec.ts`, sem `setupFiles`, roda sem Docker
+- [x] `test/jest-integration.js` — `testMatch: test/integration/**/*.int-spec.ts`,
       `setupFiles: ["dotenv/config"]`, `maxWorkers: 1`
-- [ ] `test/jest-e2e.json` — `testMatch: test/e2e/**/*.e2e-spec.ts`,
+- [x] `test/jest-e2e.js` — `testMatch: test/e2e/**/*.e2e-spec.ts`,
       `setupFiles: ["dotenv/config"]`, `maxWorkers: 1`
-- [ ] Os três com `rootDir: ".."` e `src/generated/` fora de `collectCoverageFrom` e
-      `coveragePathIgnorePatterns`
-- [ ] Bloco `jest` inline removido do `package.json`
+- [x] Os três herdam de `test/jest.base.js` (`rootDir: ".."`, transform e exclusão de
+      `src/generated/`). Configs em `.js`, não `.json`: o Jest emite
+      `Unknown option "$comment"` em toda execução se a documentação for embutida em JSON
+- [x] Bloco `jest` inline removido do `package.json`
 
 ### Scripts
 
-- [ ] `test`, `test:unit`, `test:int`, `test:e2e`, `test:all`, `test:cov`
-- [ ] `test:int` e `test:e2e` rodam sob `node --experimental-vm-modules` (exigência do Prisma 7)
+- [x] `test`, `test:unit`, `test:int`, `test:e2e`, `test:all`, `test:cov`
+- [x] `test:int` e `test:e2e` rodam sob `node --experimental-vm-modules` (exigência do Prisma 7)
       e com `DOTENV_CONFIG_PATH=.env.test`
 
 ### Chokepoint de configuração da app
 
-- [ ] `src/app.setup.ts` com `configureApp(app: INestApplication): void`
-- [ ] `src/main.ts` chama `configureApp`
-- [ ] `test/utils/create-test-app.ts` chama `configureApp` — garante que o e2e testa a mesma
+- [x] `src/app.setup.ts` com `configureApp(app: INestApplication): void`
+- [x] `src/main.ts` chama `configureApp`
+- [x] `test/utils/create-test-app.ts` chama `configureApp` — garante que o e2e testa a mesma
       configuração que roda em produção
-- [ ] `test/utils/reset-database.ts` (TRUNCATE entre arquivos de teste)
+- [x] `test/utils/reset-database.ts` — TRUNCATE de todas as tabelas de domínio, com a lista
+      lida do `pg_tables` em vez de fixa (uma lista fixa envelhece em silêncio ao adicionar
+      um model)
+- [x] `src/app.setup.spec.ts` — prova que o `ValidationPipe` global continua registrado
+- [x] `test/e2e/app.e2e-spec.ts` reescrito sobre `createTestApp`, com asserção extra de 404
 
 ### Verificação
 
-- [ ] `npm run test:unit` verde sem Docker
-- [ ] `npm run test:int` verde (mesmo resultado de antes da mudança)
-- [ ] `npm run test:e2e` verde
-- [ ] `npm run test:cov` e `grep -c "generated/prisma" coverage/lcov.info` retorna `0`
+- [x] `npm run test:unit` verde sem Docker
+- [x] `npm run test:int` verde (mesmo resultado de antes da mudança)
+- [x] `npm run test:e2e` verde
+- [x] `npm run test:cov` e `grep -c "generated/prisma" coverage/lcov.info` retorna `0`
 
 ---
 
-## Fase 3 — Ambiente de teste efêmero e build
+### Antecipado da Fase 3 (sem banco efêmero não há como verificar esta fase)
 
-- [ ] `docker-compose.test.yml` — portas `5433`/`6380`, containers `nexusops-*-test`,
-      Postgres em `tmpfs`, Redis com `--maxmemory-policy noeviction`, healthchecks nos dois
-- [ ] `.env.test` commitado (credenciais descartáveis, `DATABASE_URL` na 5433, `REDIS_PORT=6380`)
-- [ ] `!.env.test` adicionado ao `.gitignore` (que hoje ignora `.env.*`)
-- [ ] Scripts `infra:test:up`, `infra:test:down`, `test:setup`
+- [x] `docker-compose.test.yml` — portas `5433`/`6380`, Postgres em `tmpfs` com
+      `PGDATA` em subdiretório (initdb recusa um data dir 1777), Redis com
+      `noeviction`, healthchecks para permitir `--wait`
+- [x] `.env.test` commitado e `!.env.test` no `.gitignore`
+- [x] Scripts `infra:test:up`, `infra:test:down`, `test:setup`
+
+## Fase 3 — Build de produção e imagem Docker
+
+> O ambiente efêmero (`docker-compose.test.yml`, `.env.test`, scripts `infra:test:*`) foi
+> antecipado para a Fase 2: sem banco não havia como verificar os três níveis de teste.
+
 - [ ] **Correção do build:** `rootDir: "./src"` e `exclude: ["prisma.config.ts"]` em
       `tsconfig.build.json` — hoje `nest build` emite `dist/src/main.js` e `start:prod`
       (`node dist/main`) está quebrado
@@ -96,8 +107,6 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ### Verificação
 
-- [ ] `npm run infra:test:up` sobe os dois containers saudáveis
-- [ ] `npm run test:setup` aplica as migrations no banco efêmero
 - [ ] `npm run build && test -f dist/main.js` e `node dist/main` sobe na porta 3000
 - [ ] `docker build -t nexusops-backend:local .` e o container responde em `curl localhost:3000`
 

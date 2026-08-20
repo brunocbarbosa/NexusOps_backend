@@ -1,5 +1,5 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../src/generated/prisma/client';
+import { PrismaClient } from '../../src/generated/prisma/client';
 
 // Regression guard for the Prisma 7 wiring: the client only works when it is
 // generated as CJS, given a pg driver adapter, and run with VM modules enabled.
