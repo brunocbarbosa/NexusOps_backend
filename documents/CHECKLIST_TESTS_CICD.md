@@ -271,8 +271,12 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
       Depende de a camada RLS existir (ver `CLAUDE.md` → Architecture)
 - [ ] Merge dos relatórios de cobertura dos três níveis num único `lcov` para o Sonar
 - [ ] Job de deploy consumindo a imagem do GHCR
-- [ ] Considerar ligar _secret scanning_ e _push protection_ (grátis em repo público, hoje
-      `disabled`). A auditoria da Fase 0 varreu o histórico uma vez; isto varreria continuamente
+- [x] _Secret scanning_ e _push protection_ ligados. A auditoria da Fase 0 foi uma foto de cinco
+      padrões via `grep`; isto varre a cada push, para sempre, e nas chaves de parceiros notifica
+      o emissor, que revoga sozinho. Varredura completa do histórico: **0 alertas**, o que
+      corrobora a auditoria original - _Non-provider patterns_ fica **desligado** de propósito: o `.env.test` é commitado de
+      propósito (credenciais descartáveis de container efêmero) e os padrões genéricos o
+      marcariam, criando um alerta permanente sobre um não-problema
 - [ ] Reconsiderar `commitlint` como status check obrigatório — hoje é o único job cujo defeito
       não bloqueia merge nenhum, o que enfraquece o argumento de que ele existe porque
       `--no-verify` burla o hook local
