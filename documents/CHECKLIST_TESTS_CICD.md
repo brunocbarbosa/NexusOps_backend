@@ -20,16 +20,18 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 1 — Padronização local (Husky + Commitlint + lint-staged)
 
-- [ ] Dependências instaladas: `husky`, `@commitlint/cli`, `@commitlint/config-conventional`,
+- [x] Dependências instaladas: `husky`, `@commitlint/cli`, `@commitlint/config-conventional`,
       `lint-staged`
-- [ ] `commitlint.config.js` com `config-conventional` e os tipos usados no repo
+- [x] `commitlint.config.js` com `config-conventional` e os tipos usados no repo
       (`feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`)
-- [ ] `.husky/commit-msg` → `npx --no -- commitlint --edit "$1"`
-- [ ] `.husky/pre-commit` → `npx lint-staged`
-- [ ] Bloco `lint-staged` no `package.json`: `"*.ts": ["eslint --fix", "prettier --write"]`
-- [ ] Script `"prepare": "husky || true"` — o `|| true` é obrigatório, senão `npm ci` no build
+- [x] `.husky/commit-msg` → `npx --no -- commitlint --edit "$1"`
+- [x] `.husky/pre-commit` → `npx lint-staged`
+- [x] Bloco `lint-staged` no `package.json`: `*.ts` → `eslint --fix` (o eslint-plugin-prettier
+      já formata; encadear `prettier --write` faria os dois brigarem); `*.{json,md,yml,yaml}`
+      → `prettier --write`
+- [x] Script `"prepare": "husky || true"` — o `|| true` é obrigatório, senão `npm ci` no build
       Docker (sem `.git`) falha
-- [ ] **Verificação:** commit com mensagem fora do padrão é rejeitado
+- [x] **Verificação:** commit com mensagem fora do padrão é rejeitado
 
 ---
 
@@ -146,9 +148,9 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 ## Passos manuais (fora do escopo automatizável)
 
 - [ ] Criar conta no SonarCloud e vincular o repositório
-- [ ] Cadastrar `SONAR_TOKEN` em *Settings → Secrets and variables → Actions → Secrets*
+- [ ] Cadastrar `SONAR_TOKEN` em _Settings → Secrets and variables → Actions → Secrets_
 - [ ] Definir a variável de repositório `SONAR_ENABLED=true` para ligar o job
-- [ ] Habilitar *Dependabot alerts* e *security updates* em *Settings → Code security*
+- [ ] Habilitar _Dependabot alerts_ e _security updates_ em _Settings → Code security_
 
 ---
 
