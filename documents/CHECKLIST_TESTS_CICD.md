@@ -228,13 +228,37 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Passos manuais (fora do escopo automatizável)
 
-- [ ] Criar conta no SonarCloud e vincular o repositório
-- [ ] Cadastrar `SONAR_TOKEN` em _Settings → Secrets and variables → Actions → Secrets_
-- [ ] Definir as variáveis de repositório `SONAR_ENABLED=true`, `SONAR_PROJECT_KEY` e
+- [x] Criar conta no SonarCloud e vincular o repositório
+      (`brunocbarbosa` / `brunocbarbosa_NexusOps_backend`)
+- [x] Cadastrar `SONAR_TOKEN` em _Settings → Secrets and variables → Actions → Secrets_
+- [x] Definir as variáveis de repositório `SONAR_ENABLED=true`, `SONAR_PROJECT_KEY` e
       `SONAR_ORGANIZATION` — o job lê as três de `vars`, nada está fixo no workflow
-- [ ] Habilitar _Dependabot alerts_ e _security updates_ em _Settings → Code security_
+- [x] **Desligar o _Automatic Analysis_** no SonarCloud (projeto → Administration → Analysis
+      Method). Não estava previsto: o SonarCloud liga sozinho ao importar o projeto, e recusa
+      análise vinda de CI enquanto ele estiver ativo. Também é o que produzia as 23
+      "vulnerabilidades" que a análise da CI reporta como 0 — o Automatic Analysis varre o
+      repositório inteiro, incluindo as skills vendorizadas do Prisma, enquanto o job usa
+      `sonar.sources=src`
+- [x] Habilitar _Dependabot alerts_ e _security updates_ em _Settings → Code security_
+      (confirmado: `dependabot_security_updates: enabled`, `/vulnerability-alerts` → 204)
+- [x] Subir `SonarSource/sonarqube-scan-action` de `@v5` para `@v6` — argument injection de
+      severidade **high**, e foi o primeiro alerta que o Dependabot levantou assim que foi
+      ligado. Vale registrar por que o job `audit` não pegava: `npm audit` só enxerga pacotes
+      npm, e isto é uma GitHub Action. Os dois se complementam, não se sobrepõem
 - [ ] Decidir o destino do PR #2 (`typescript@7`): reprovado por incompatibilidade real de peer
       com `ts-jest@29`, não por defeito do pipeline. Fica vermelho até o ts-jest suportar TS 7
+
+### Verificação da integração com o SonarCloud
+
+- [x] `sonar` sai do `skipping` e roda: `EXECUTION SUCCESS`, análise publicada no PR #8
+- [x] Quality gate `OK` — `new_coverage` 100% (limite 80), duplicação 0% (limite 3),
+      0 bugs / 0 vulnerabilidades / 0 hotspots
+- [x] A cobertura chega mesmo: `Sensor JavaScript/TypeScript Coverage` lê
+      `coverage/lcov.info` baixado do artifact do job `test`
+
+> A cobertura do **projeto** fica em 11,1% e isso não é defeito: o repo ainda é scaffold e o
+> denominador é quase só `src/tenancy/`. O gate mede `new_coverage`, não o total — ver
+> `coverageThreshold` em Pendências futuras.
 
 ---
 
@@ -247,3 +271,8 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
       Depende de a camada RLS existir (ver `CLAUDE.md` → Architecture)
 - [ ] Merge dos relatórios de cobertura dos três níveis num único `lcov` para o Sonar
 - [ ] Job de deploy consumindo a imagem do GHCR
+- [ ] Considerar ligar _secret scanning_ e _push protection_ (grátis em repo público, hoje
+      `disabled`). A auditoria da Fase 0 varreu o histórico uma vez; isto varreria continuamente
+- [ ] Reconsiderar `commitlint` como status check obrigatório — hoje é o único job cujo defeito
+      não bloqueia merge nenhum, o que enfraquece o argumento de que ele existe porque
+      `--no-verify` burla o hook local
