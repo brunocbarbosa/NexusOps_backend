@@ -10,7 +10,7 @@
 > | 1 — Husky + Commitlint + lint-staged  | ✅ concluída | `62a811f` |
 > | 2 — Três níveis de teste              | ✅ concluída | `7ac02e6` |
 > | 3 — Build de produção e imagem Docker | ✅ concluída | `2830bee` |
-> | 4 — Pipeline GitHub Actions           | ✅ concluída | `4672b6b` |
+> | 4 — Pipeline GitHub Actions           | ✅ concluída | `ff0b99b` |
 > | 5 — Proteção de branch                | ⬜ pendente  | —         |
 > | 6 — Documentação                      | ⬜ pendente  | —         |
 >
