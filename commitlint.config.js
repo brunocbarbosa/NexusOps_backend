@@ -28,8 +28,15 @@ module.exports = {
         'revert',
       ],
     ],
-    // Nest's own commit style and this repo's history both use lower case.
-    'subject-case': [2, 'always', 'lower-case'],
+    // Rejects the cases that signal a non-conventional subject — "Adiciona
+    // coisa", "Add Thing", "FIX THE BUILD" — without demanding the subject be
+    // literally lower-case. Demanding that bans every acronym, and this repo's
+    // vocabulary is made of them: CI/CD, RLS, JWT, WASM, GHCR.
+    'subject-case': [
+      2,
+      'never',
+      ['sentence-case', 'start-case', 'pascal-case', 'upper-case'],
+    ],
     // Bodies wrap at 80 in this repo; the default 100 would allow drift.
     'body-max-line-length': [2, 'always', 100],
   },
