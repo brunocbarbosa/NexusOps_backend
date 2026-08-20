@@ -241,6 +241,10 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
       `sonar.sources=src`
 - [x] Habilitar _Dependabot alerts_ e _security updates_ em _Settings → Code security_
       (confirmado: `dependabot_security_updates: enabled`, `/vulnerability-alerts` → 204)
+- [x] Subir `SonarSource/sonarqube-scan-action` de `@v5` para `@v6` — argument injection de
+      severidade **high**, e foi o primeiro alerta que o Dependabot levantou assim que foi
+      ligado. Vale registrar por que o job `audit` não pegava: `npm audit` só enxerga pacotes
+      npm, e isto é uma GitHub Action. Os dois se complementam, não se sobrepõem
 - [ ] Decidir o destino do PR #2 (`typescript@7`): reprovado por incompatibilidade real de peer
       com `ts-jest@29`, não por defeito do pipeline. Fica vermelho até o ts-jest suportar TS 7
 
@@ -267,9 +271,6 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
       Depende de a camada RLS existir (ver `CLAUDE.md` → Architecture)
 - [ ] Merge dos relatórios de cobertura dos três níveis num único `lcov` para o Sonar
 - [ ] Job de deploy consumindo a imagem do GHCR
-- [ ] Subir `SonarSource/sonarqube-scan-action` de `@v5` para `@v6` — a própria ação avisa em
-      toda execução que a v5 não é mais suportada e contém uma vulnerabilidade. O Dependabot
-      abre esse PR sozinho na próxima segunda
 - [ ] Considerar ligar _secret scanning_ e _push protection_ (grátis em repo público, hoje
       `disabled`). A auditoria da Fase 0 varreu o histórico uma vez; isto varreria continuamente
 - [ ] Reconsiderar `commitlint` como status check obrigatório — hoje é o único job cujo defeito

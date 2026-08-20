@@ -228,7 +228,12 @@ jobs:
           name: coverage
           path: coverage/
 
-      - uses: SonarSource/sonarqube-scan-action@v5
+      # v6 e não v5: a v5 carrega uma vulnerabilidade high de argument injection
+      # (GHSA, corrigida na 6.0.0), e a própria ação imprime esse aviso a cada
+      # execução. Aqui o `args` só recebe variáveis de repositório, que apenas um
+      # admin define — mas não há razão para manter a versão vulnerável quando a
+      # v6 aceita exatamente os mesmos inputs.
+      - uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
