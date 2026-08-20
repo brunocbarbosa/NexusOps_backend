@@ -11,8 +11,8 @@
 > | 2 — Três níveis de teste              | ✅ concluída | `7ac02e6` |
 > | 3 — Build de produção e imagem Docker | ✅ concluída | `2830bee` |
 > | 4 — Pipeline GitHub Actions           | ✅ concluída | `ff0b99b` |
-> | 5 — Proteção de branch                | ✅ concluída | `PEND5`   |
-> | 6 — Documentação                      | ✅ concluída | `PEND5`   |
+> | 5 — Proteção de branch                | ✅ concluída | rulesets  |
+> | 6 — Documentação                      | ✅ concluída | `fe100f2` |
 >
 > As seções das fases concluídas trazem uma nota **Como saiu** ao final, com os desvios
 > em relação ao que estava planejado e os defeitos encontrados durante a execução.
