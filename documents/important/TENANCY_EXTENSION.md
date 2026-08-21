@@ -1,6 +1,6 @@
 # Tenancy extension — measured behaviour of Prisma 7.9.1
 
-Read this before editing `tenant-extension.ts` or `tenant-context.ts`.
+Read this before editing `src/tenancy/tenant-extension.ts` or `src/tenancy/tenant-context.ts`.
 
 Everything below was **measured against Prisma 7.9.1 in this repository**, not taken from
 documentation. The design of the extension depends on all of it, so a Prisma upgrade means
@@ -53,4 +53,4 @@ cannot quietly widen into a read of every tenant.
 `$queryRaw` / `$executeRaw` are client operations, not model ones, and never reach the extension.
 That, plus a defect in the extension itself, is the entire remaining job for Row-Level Security —
 considerably smaller than it looked before these measurements. The RLS notes, including two traps
-that cost real debugging time, are in [`documents/RLS_NOTES.md`](../../documents/RLS_NOTES.md).
+that cost real debugging time, are in [`RLS_NOTES.md`](./RLS_NOTES.md).

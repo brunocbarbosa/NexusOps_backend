@@ -16,18 +16,20 @@ pipeline are in place, and the domain modules are not written yet.
 
 Other documents, by purpose:
 
-| File                                | Read it when                                                 |
-| ----------------------------------- | ------------------------------------------------------------ |
-| `documents/MAIN.md`                 | implementing anything architectural — the spec               |
-| `documents/DATABASE_MODEL.md`       | touching the schema                                          |
-| `documents/GUIA_CI_CD.md`           | you need the CI/CD setup explained from first principles     |
-| `documents/PLANO_TESTS_CICD.md`     | you want the reasoning behind a CI/CD decision               |
-| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending      |
-| `documents/RLS_NOTES.md`            | before implementing Row-Level Security — it is not built yet |
-| `documents/ROTEIRO_TESTS.md`        | never — historical, diverges from this repo in 8 places      |
+| File                                | Read it when                                                        |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `documents/MAIN.md`                 | implementing anything architectural — the spec                      |
+| `documents/DATABASE_MODEL.md`       | touching the schema                                                 |
+| `documents/GUIA_CI_CD.md`           | you need the CI/CD setup explained from first principles            |
+| `documents/PLANO_TESTS_CICD.md`     | you want the reasoning behind a CI/CD decision                      |
+| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending             |
+| `documents/important/`              | the two deep references below — kept together so they stay findable |
+| `documents/ROTEIRO_TESTS.md`        | never — historical, diverges from this repo in 8 places             |
 
-`src/tenancy/README.md` sits next to the code it describes: the measured behaviour of Prisma 7.9.1
-that the tenant extension depends on. Read it before editing that directory.
+`documents/important/` holds the two deep references that the sections below point at rather than
+inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on
+— read it before editing `src/tenancy/`) and `RLS_NOTES.md` (Row-Level Security, which is **not
+implemented yet**). They live together so that detail nobody needs today does not get lost.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
 > starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
@@ -207,15 +209,15 @@ everywhere in the codebase:
 
 The extension's measured behaviour against Prisma 7.9.1 — five findings the design depends on,
 including why nested access cannot be intercepted and why that hole is closed in the schema instead
-— is in **`src/tenancy/README.md`**. Read it before editing anything in that directory, and
-re-check it after a Prisma upgrade.
+— is in **`documents/important/TENANCY_EXTENSION.md`**. Read it before editing anything in
+`src/tenancy/`, and re-check it after a Prisma upgrade.
 
 **RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
 the code today. Two things will bite whoever writes it, both measured here rather than read in
 documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
 currently connects as one; and setting the tenant outside an interactive `$transaction` lands on a
 different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
-The measurements and the remaining work are in **`documents/RLS_NOTES.md`**.
+The measurements and the remaining work are in **`documents/important/RLS_NOTES.md`**.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
