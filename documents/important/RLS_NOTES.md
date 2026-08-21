@@ -12,7 +12,7 @@ RLS é a **segunda**, deliberadamente redundante, para o caso de a primeira ser 
 cru, ou um defeito na própria extensão.
 
 `$queryRaw` / `$executeRaw` são operações de client, não de model, e nunca passam pela extensão.
-Esse é o buraco concreto que a RLS fecha. Ver [`../src/tenancy/README.md`](../src/tenancy/README.md)
+Esse é o buraco concreto que a RLS fecha. Ver [`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md)
 para o que a extensão cobre e o que ela não alcança.
 
 ## As duas armadilhas, medidas neste repositório
