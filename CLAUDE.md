@@ -277,6 +277,20 @@ Both branches require a pull request with `quality` and `test` green; `main` add
 `guard-main-source`. There are no bypass actors, so a direct push to either branch is rejected —
 including one from an admin. Work starts on a feature branch.
 
+**Merge `development` into `main` with a merge commit, never with a squash.** A squash rewrites the
+work as a new commit under a new sha, and because `development` keeps living afterwards, `main`
+stops being its ancestor: git then reads the two branches as independent work and the _next_ release
+pull request opens conflicted in every file both sides touched. That is not hypothetical — PR #8 was
+squashed and PR #21 came up `CONFLICTING` because of it, in `CLAUDE.md`, `README.md`, the checklist
+and a file `development` had deliberately deleted. Recovering from it costs a reconciliation merge
+(`git merge origin/main -s ours`, PR #22) before the release can proceed at all. A conflicted PR also
+cannot produce a `pull_request` CI run, because GitHub cannot compute `refs/pull/N/merge` — so the
+checks that appear on it are the ones from the `push` event, which is easy to mistake for a green PR.
+
+Squashing a _feature_ branch into `development` is fine and is the normal flow: the branch is deleted
+right after, so nothing survives to diverge. The rule is specifically about the two long-lived
+branches.
+
 The pipeline runs seven jobs. Three are worth knowing about before you touch them:
 
 - **`test`** runs `npm run test:setup` and then the three tiers, against the same
