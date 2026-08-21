@@ -1,0 +1,78 @@
+# Atualizações automáticas de dependências.
+#
+# Complementa, não substitui, o job `audit` do ci.yml: o Dependabot abre PR mas
+# não reprova build nenhum, e o `npm audit --audit-level=high` reprova. Um pega
+# o que ainda não foi corrigido, o outro traz a correção.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    # PR vai para a development, nunca para a main: `main` só recebe da
+    # development, e o job guard-main-source reprovaria qualquer outra origem.
+    target-branch: development
+    commit-message:
+      # Casa com o commitlint (config-conventional): sem isto, todo PR do
+      # Dependabot reprova no job de commitlint.
+      prefix: build
+      prefix-development: chore
+      include: scope
+    ignore:
+      # TypeScript não sobe de major sozinho. Ela tem que andar em lockstep com
+      # o peer do ts-jest, com o typescript-eslint e com o Nest — o primeiro PR
+      # automático que tentou (TS 7) reprovou já no `npm ci`, porque o peer do
+      # ts-jest@29 não aceita. Minor e patch continuam passando normalmente.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      # Os tipos do Node acompanham o runtime que este projeto de fato roda
+      # (node:24-alpine no Dockerfile, node-version: 24 na CI). Tipar contra uma
+      # major mais nova aprova, em tempo de compilação, API que não existe em
+      # produção.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+    groups:
+      # Um PR por ecossistema em vez de um por pacote. As dependências do Nest
+      # sobem em conjunto e revisá-las em sete PRs separados é ruído.
+      nestjs:
+        patterns: ['@nestjs/*']
+      prisma:
+        patterns: ['prisma', '@prisma/*']
+      # `@eslint/*` precisa estar aqui explicitamente: o padrão `eslint*` não
+      # casa com um nome que começa por `@`, e sem esta linha o `@eslint/js` sai
+      # num PR solto propondo justamente a dessincronização de major com o
+      # `eslint` — foi o que aconteceu no primeiro dia.
+      types-and-linting:
+        patterns:
+          [
+            '@types/*',
+            'eslint',
+            'eslint-*',
+            '@eslint/*',
+            'typescript-eslint',
+            'prettier*',
+            'typescript',
+          ]
+      jest:
+        patterns:
+          ['jest', 'ts-jest', '@types/jest', 'supertest', '@types/supertest']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    target-branch: development
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ['*']

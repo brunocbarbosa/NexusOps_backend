@@ -69,6 +69,8 @@ web_modules/
 .env
 .env.*
 !.env.example
+# Throwaway credentials for docker-compose.test.yml only; CI reads it too.
+!.env.test
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

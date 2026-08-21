@@ -25,13 +25,21 @@ npm run start:dev         # dev server, watch mode
 npm run build             # nest build -> dist/
 npm run start:prod        # node dist/main
 
-npm run lint              # eslint --fix over src, apps, libs, test
-npm run format            # prettier --write
+npm run infra:test:up     # start the ephemeral test stack (ports 5433/6380)
+npm run infra:test:down   # stop it and destroy its volumes
+npm run test:setup        # infra:test:up + migrate deploy against .env.test
 
-npm test                  # jest unit tests (*.spec.ts under src/)
+npm run lint              # eslint --fix over src, apps, libs, test
+npm run format            # prettier --write over the whole repo
+npm run format:check      # same, read-only (this is what CI runs)
+
+npm test                  # alias for test:unit
+npm run test:unit         # tier 1 — mocks only, no Docker (src/**/*.spec.ts)
+npm run test:int          # tier 2 — real Postgres, no HTTP (test/integration/*.int-spec.ts)
+npm run test:e2e          # tier 3 — Supertest against a booted app (test/e2e/*.e2e-spec.ts)
+npm run test:all          # the three in order
 npm run test:watch
-npm run test:cov
-npm run test:e2e          # e2e + DB-backed tests (needs infra:up)
+npm run test:cov          # coverage for the unit tier
 
 npm run prisma:generate   # regenerate client into src/generated/prisma
 npm run prisma:migrate    # migrate dev (creates + applies a migration)
@@ -46,17 +54,46 @@ Run a single unit test file or a single test by name:
 npx jest src/path/to/file.spec.ts
 npx jest -t "substring of the test name"
 
-# e2e must keep the --experimental-vm-modules flag (see "Prisma 7 wiring" below):
-node --experimental-vm-modules node_modules/jest/bin/jest.js \
-  --config ./test/jest-e2e.json -t "substring"
+# The integration and e2e tiers must keep both the --experimental-vm-modules flag
+# (see "Prisma 7 wiring" below) and DOTENV_CONFIG_PATH, or they will run against
+# the development database instead of the ephemeral one:
+DOTENV_CONFIG_PATH=.env.test node --experimental-vm-modules \
+  node_modules/jest/bin/jest.js --config ./test/jest-integration.js -t "substring"
 ```
 
 Note that `npm run lint` is `eslint --fix`: it rewrites files. Use `npx eslint "src/**/*.ts"`
 when you need a read-only check.
 
-Postgres and Redis must be running for anything touching the database or queues. `npm test` (unit)
-does not need them; `npm run test:e2e` does, because `test/prisma.e2e-spec.ts` opens a real
-connection.
+## Three test tiers
+
+The boundary between them is what each one is allowed to touch, and the point is that a failure
+tells you where to look before you open the file:
+
+| Tier            | Command             | Reaches                        | Config                     |
+| --------------- | ------------------- | ------------------------------ | -------------------------- |
+| **unit**        | `npm run test:unit` | nothing — mocks only           | `test/jest-unit.js`        |
+| **integration** | `npm run test:int`  | a real Postgres, no HTTP       | `test/jest-integration.js` |
+| **e2e**         | `npm run test:e2e`  | HTTP against a booted Nest app | `test/jest-e2e.js`         |
+
+All three inherit from `test/jest.base.js`, which pins `rootDir` at the repository root — a
+per-tier `rootDir` makes the emitted lcov paths incomparable and the reports impossible to merge
+into one coverage number later. The configs are `.js` and not `.json` because Jest prints
+`Unknown option "$comment"` on every run if the documentation is embedded in JSON.
+
+The tenancy regressions live in the integration tier: `test/integration/tenant-isolation.int-spec.ts`
+is what holds the chokepoint design in place, and `test/integration/prisma-wiring.int-spec.ts` is
+the regression guard for the three Prisma 7 requirements below.
+
+**The database is a separate, ephemeral one.** `docker-compose.test.yml` runs Postgres on 5433 and
+Redis on 6380, with the data directory on `tmpfs` — it starts empty and dies with the container.
+`.env.test` points at it and is **committed on purpose**: the credentials only ever reach that
+throwaway stack, and CI needs the same values without a secret round-trip. `.gitignore` therefore
+carries an explicit `!.env.test` exception. The `test:int` / `test:e2e` scripts set
+`DOTENV_CONFIG_PATH=.env.test`, which is the only thing keeping the suites off the development
+database — they truncate and reseed, so pointing them at `.env` wipes local data.
+
+`npm run test:unit` needs nothing running. The other two need `npm run test:setup` first (or
+`infra:test:up` plus `prisma migrate deploy`), and CI runs exactly those same scripts.
 
 ## Environment
 
@@ -74,11 +111,11 @@ adding `env("DATABASE_URL")` back to it. Jest picks up `.env` only in the e2e co
 ## Prisma 7 wiring
 
 Prisma 7 is a sharp break from v6 and three separate things must all be right, or the client fails.
-`test/prisma.e2e-spec.ts` is the regression guard for all three — run `npm run test:e2e` after
-touching any of them.
+`test/integration/prisma-wiring.int-spec.ts` is the regression guard for all three — run
+`npm run test:int` after touching any of them.
 
 1. **A driver adapter is mandatory** for SQL providers. `new PrismaClient()` with no arguments is a
-   *compile-time* error in v7 ("Expected 1 arguments, but got 0"). The client must be constructed as:
+   _compile-time_ error in v7 ("Expected 1 arguments, but got 0"). The client must be constructed as:
 
    ```ts
    import { PrismaPg } from '@prisma/adapter-pg';
@@ -97,10 +134,11 @@ touching any of them.
 
 3. **Jest needs VM modules.** The Prisma runtime uses dynamic `import()`, which Jest's default CJS
    VM rejects with "A dynamic import callback was invoked without --experimental-vm-modules". The
-   `test:e2e` script therefore runs Jest through `node --experimental-vm-modules` instead of the
-   `jest` binary. Any DB-backed test must run under that script, not `npm test`.
+   `test:int` and `test:e2e` scripts therefore run Jest through `node --experimental-vm-modules`
+   instead of the `jest` binary. Any DB-backed test must run under one of those, not `npm test`.
 
-`npm test` (unit) stays green without Docker running; `npm run test:e2e` requires `npm run infra:up`.
+`npm test` (unit) stays green without Docker running; `npm run test:int` and `npm run test:e2e`
+require `npm run test:setup`.
 
 Unrelated v7 rename that costs a minute each time: `prisma migrate diff` dropped
 `--from-schema-datasource`. Comparing the live database against a candidate schema is now
@@ -137,14 +175,14 @@ depends on all five:
   that another tenant's resource exists.
 - **`PrismaPromise` is lazy, and that will eat your context.** The query is dispatched when the
   promise is awaited, not when the method is called. So `als.run(store, () => prisma.x.findMany())`
-  dispatches *outside* the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
+  dispatches _outside_ the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
   `storage.run`; do not "simplify" it back to a synchronous wrapper. Symptom when this regresses:
   `TenantContextMissingError` from code that visibly established a tenant.
 - **Query extensions never fire for nested access.** `include: {}` intercepts only the parent
   operation, and so does a nested `create`. The extension cannot filter a nested read or fix a
   nested child's `tenantId`.
 - **That hole is closed in the schema, not in the extension.** Child relations use composite foreign
-  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input *without*
+  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input _without_
   a `tenantId` field, so the wrong tenant stops being expressible, and a cross-tenant child cannot
   exist for a nested read to return. Cost: the two optional relations lose `ON DELETE SET NULL` and
   become `RESTRICT`, because part of a composite key cannot be nulled while `tenant_id` is
@@ -171,7 +209,7 @@ mechanisms, and the second is the one that bites — both measured against this 
 not taken from documentation:
 
 - The **table owner** bypasses RLS. `ALTER TABLE ... FORCE ROW LEVEL SECURITY` fixes that case.
-- A **superuser** bypasses RLS unconditionally, and `FORCE` does *not* help. `docker-compose.yml`
+- A **superuser** bypasses RLS unconditionally, and `FORCE` does _not_ help. `docker-compose.yml`
   sets `POSTGRES_USER=nexusops`, and `initdb` makes that role a superuser: `pg_roles` reports
   `rolsuper = t, rolbypassrls = t`. So with the default `DATABASE_URL`, every policy is dead
   weight while `pg_policies` still shows the setup as correct — a silent failure that looks like
@@ -190,7 +228,7 @@ a `NOSUPERUSER NOBYPASSRLS` non-owner it returned only the scoped rows, and zero
 2. `@prisma/adapter-pg` sends any query outside `$transaction()` straight to the `pg.Pool`, one
    checkout per call, so a standalone `set_config` and the following query can land on different
    physical connections — and a session-scoped value lingers on whichever connection last set it.
-   Under concurrency that yields *another single tenant's* rows, intermittently. Measured on a pool
+   Under concurrency that yields _another single tenant's_ rows, intermittently. Measured on a pool
    of 4 with 60 concurrent requests: 46 of 60 observed the wrong tenant. Pinning one connection per
    request and using transaction-local scope brought it to 0 of 60.
 
@@ -229,6 +267,33 @@ when upgrading Prisma.
 Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
 (`passport-jwt`) and `bcrypt` for password hashing. Validation uses `class-validator` /
 `class-transformer`, which need a global `ValidationPipe` — not yet registered in `src/main.ts`.
+
+## CI and branch flow
+
+`development` is the default branch and the one all work targets. `main` receives **only** from
+`development`, and that is enforced by a job, not by a convention: GitHub rulesets can require a
+pull request but cannot restrict the branch it comes _from_, so `.github/workflows/ci.yml` carries
+a `guard-main-source` job that fails any PR into `main` whose head is not `development`.
+
+Both branches require a pull request with `quality` and `test` green; `main` additionally requires
+`guard-main-source`. There are no bypass actors, so a direct push to either branch is rejected —
+including one from an admin. Work starts on a feature branch.
+
+The pipeline runs seven jobs. Three are worth knowing about before you touch them:
+
+- **`test`** runs `npm run test:setup` and then the three tiers, against the same
+  `docker-compose.test.yml` you run locally. GitHub Actions' `services:` directive cannot override
+  a container's command, and Redis must start with `--maxmemory-policy noeviction`, which is why
+  one compose file serves both environments instead of two definitions drifting apart.
+- **`docker`** builds the image on every PR and pushes to GHCR only on push to `main`. It boots the
+  image and curls it before pushing — a build that emits nothing exits 0 and the `COPY` of an empty
+  `dist/` succeeds, so only a boot catches that — and then runs `scripts/docker-smoke.js` against a
+  live database, which is what keeps the Dockerfile's aggressive prune honest.
+- **`commitlint`** re-checks the commit messages that `git commit --no-verify` skipped locally.
+  `commitlint.config.js` exempts commits carrying Dependabot's `Signed-off-by` trailer: its subject
+  is sentence-case and not configurable, so without the exemption every bot PR is permanently red.
+
+`sonar` is written and inert until the repository variable `SONAR_ENABLED` is set to `true`.
 
 ## Repo conventions
 

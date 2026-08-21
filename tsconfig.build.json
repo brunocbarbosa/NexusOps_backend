@@ -1,4 +1,26 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  "compilerOptions": {
+    // Without this, prisma.config.ts at the repository root joins the program
+    // and tsc infers a rootDir of "." — so the build lands in dist/src/main.js
+    // while `start:prod` and the Dockerfile CMD both point at dist/main.
+    "rootDir": "./src",
+    // Pinned inside the output directory, and that placement is the whole
+    // point. tsc derives this path from rootDir, so setting rootDir to ./src
+    // moves the default to the repository root — outside anything `nest build`
+    // cleans. `deleteOutDir` then wipes dist/ while the incremental cache
+    // survives and still claims the build is up to date, so a clean build
+    // emits nothing at all and exits 0. Keeping the cache in dist/ makes it die
+    // with the output it describes.
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
+  },
+  "exclude": [
+    "node_modules",
+    "test",
+    "dist",
+    "**/*spec.ts",
+    // Config for the Prisma CLI, not application code. It is run by ts-node
+    // through prisma.config.ts, never imported by anything under src/.
+    "prisma.config.ts"
+  ]
 }

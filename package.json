@@ -7,17 +7,18 @@
   "license": "MIT",
   "scripts": {
     "build": "nest build",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
+    "test": "npm run test:unit",
+    "test:watch": "jest --config ./test/jest-unit.js --watch",
+    "test:cov": "jest --config ./test/jest-unit.js --coverage",
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config ./test/jest-unit.js --runInBand",
+    "test:e2e": "DOTENV_CONFIG_PATH=.env.test node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.js",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:reset": "docker compose down -v && docker compose up -d",
@@ -26,7 +27,15 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:reset": "prisma migrate reset",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "prepare": "husky || true",
+    "test:unit": "jest --config ./test/jest-unit.js",
+    "test:int": "DOTENV_CONFIG_PATH=.env.test node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.js",
+    "test:all": "npm run test:unit && npm run test:int && npm run test:e2e",
+    "infra:test:up": "docker compose -f docker-compose.test.yml up -d --wait",
+    "infra:test:down": "docker compose -f docker-compose.test.yml down -v",
+    "test:setup": "npm run infra:test:up && DOTENV_CONFIG_PATH=.env.test npx prisma migrate deploy",
+    "docker:build": "docker build -t nexusops-backend:local ."
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.5",
@@ -54,8 +63,10 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "@eslint/eslintrc": "^3.2.0",
-    "@eslint/js": "^9.18.0",
+    "@eslint/js": "^10.0.1",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
@@ -67,11 +78,13 @@
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.0.0",
     "dotenv": "^17.4.2",
-    "eslint": "^9.18.0",
+    "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",
     "globals": "^17.0.0",
+    "husky": "^9.1.7",
     "jest": "^30.0.0",
+    "lint-staged": "^17.3.0",
     "prettier": "^3.4.2",
     "prisma": "^7.9.1",
     "source-map-support": "^0.5.21",
@@ -86,21 +99,12 @@
   "overrides": {
     "deepmerge-ts": "^8.0.1"
   },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix"
     ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }

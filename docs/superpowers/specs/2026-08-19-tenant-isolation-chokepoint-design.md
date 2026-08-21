@@ -41,7 +41,7 @@ With `comments.(tenant_id, ticket_id)` referencing `tickets.(tenant_id, id)`, Pr
 derived from the parent. A nested write with the wrong tenant is not rejected at runtime; it stops
 being expressible.
 
-Nested *reads* are then safe by construction rather than by filtering: a `Comment` belonging to
+Nested _reads_ are then safe by construction rather than by filtering: a `Comment` belonging to
 another tenant cannot exist while pointing at this tenant's `Ticket`, so `include` has nothing to
 leak.
 
@@ -71,13 +71,13 @@ A pure constraint swap — no column changes, no data movement. Generated and re
 `prisma migrate diff --from-schema ... --to-schema ... --script` (note: Prisma 7 renamed these flags;
 `--from-schema-datasource` was removed).
 
-| Table | Old | New |
-|---|---|---|
-| `tickets` | `(requester_id) → users(id)` | `(tenant_id, requester_id) → users(tenant_id, id)` |
-| `tickets` | `(assignee_id) → users(id)` | `(tenant_id, assignee_id) → users(tenant_id, id)` |
-| `comments` | `(ticket_id) → tickets(id)` | `(tenant_id, ticket_id) → tickets(tenant_id, id)` |
-| `comments` | `(author_id) → users(id)` | `(tenant_id, author_id) → users(tenant_id, id)` |
-| `audit_logs` | `(user_id) → users(id)` | `(tenant_id, user_id) → users(tenant_id, id)` |
+| Table        | Old                          | New                                                |
+| ------------ | ---------------------------- | -------------------------------------------------- |
+| `tickets`    | `(requester_id) → users(id)` | `(tenant_id, requester_id) → users(tenant_id, id)` |
+| `tickets`    | `(assignee_id) → users(id)`  | `(tenant_id, assignee_id) → users(tenant_id, id)`  |
+| `comments`   | `(ticket_id) → tickets(id)`  | `(tenant_id, ticket_id) → tickets(tenant_id, id)`  |
+| `comments`   | `(author_id) → users(id)`    | `(tenant_id, author_id) → users(tenant_id, id)`    |
+| `audit_logs` | `(user_id) → users(id)`      | `(tenant_id, user_id) → users(tenant_id, id)`      |
 
 `tenant_id` participates in several relations per model; Prisma validates this and generates it
 without complaint.
@@ -107,7 +107,7 @@ An `AsyncLocalStorage` store with four exports:
 **Both runners are async, and they await `fn()` inside `storage.run`.** This was discovered during
 implementation, by a test failure: `PrismaPromise` is lazy, so the query is dispatched when the
 promise is awaited rather than when the method is called. A synchronous wrapper lets
-`runWithTenant(id, () => prisma.ticket.findMany())` dispatch *outside* the scope. Eight tests failed
+`runWithTenant(id, () => prisma.ticket.findMany())` dispatch _outside_ the scope. Eight tests failed
 this way before the fix. Do not simplify it back.
 
 Deliberately **no** `currentTenantId(): string | undefined`. A getter that can return `undefined`
@@ -129,21 +129,21 @@ TENANT_AGNOSTIC = new Set(['Tenant'])
 
 For every other model, `requireTenantId()` first, then by operation:
 
-| Operations | Injection |
-|---|---|
-| `findUnique` `findUniqueOrThrow` `findFirst` `findFirstOrThrow` `findMany` `count` `aggregate` `groupBy` `delete` `deleteMany` | `args.where = { ...args.where, tenantId }` |
-| `update` `updateMany` `updateManyAndReturn` | same, **and** `data.tenantId` is rejected outright |
-| `create` | `args.data.tenantId = tenantId` |
-| `createMany` `createManyAndReturn` | inject into every element of `args.data` |
-| `upsert` | `args.where` and `args.create`; `args.update.tenantId` rejected |
-| anything else, including `findRaw` / `aggregateRaw` | **throws** |
+| Operations                                                                                                                     | Injection                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `findUnique` `findUniqueOrThrow` `findFirst` `findFirstOrThrow` `findMany` `count` `aggregate` `groupBy` `delete` `deleteMany` | `args.where = { ...args.where, tenantId }`                      |
+| `update` `updateMany` `updateManyAndReturn`                                                                                    | same, **and** `data.tenantId` is rejected outright              |
+| `create`                                                                                                                       | `args.data.tenantId = tenantId`                                 |
+| `createMany` `createManyAndReturn`                                                                                             | inject into every element of `args.data`                        |
+| `upsert`                                                                                                                       | `args.where` and `args.create`; `args.update.tenantId` rejected |
+| anything else, including `findRaw` / `aggregateRaw`                                                                            | **throws**                                                      |
 
 Two corrections to the operation list as first drafted. `updateManyAndReturn` exists and was missing —
 an unclassified write operation is a leak, which is why the final branch throws instead of falling
 through: a Prisma upgrade that adds an operation now breaks loudly.
 
 And an update must not be allowed to touch `tenantId` at all. The `where` filter confines an update to
-the caller's own rows, but `data: { tenantId: other }` would move a row *out* of the tenant — a leak
+the caller's own rows, but `data: { tenantId: other }` would move a row _out_ of the tenant — a leak
 the where-filter does not catch. Both the `{ tenantId: x }` and `{ tenantId: { set: x } }` forms are
 rejected.
 

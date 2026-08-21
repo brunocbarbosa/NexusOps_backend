@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../src/generated/prisma/client';
+import { PrismaClient } from '../../src/generated/prisma/client';
 import {
   CrossTenantWriteError,
   tenantIsolationExtension,
-} from '../src/tenancy/tenant-extension';
+} from '../../src/tenancy/tenant-extension';
 import {
   TenantContextMissingError,
   runWithTenant,
   runWithoutTenant,
-} from '../src/tenancy/tenant-context';
+} from '../../src/tenancy/tenant-context';
 
 // What the domain schema does and does not guarantee on its own.
 //
