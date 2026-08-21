@@ -378,6 +378,15 @@ do arrive, and then fails with "Not authorized". And SonarCloud's **Automatic An
 off**: it refuses CI-based analysis while enabled, and it scans the whole repository, vendored
 Prisma docs included, where the job scopes itself to `src`.
 
+**`sonar.tests` has to include `src`, not just `test/`.** The unit specs live next to the code they
+cover, so `sonar.sources=src` alone analysed them as production code — which cost twice, both
+measured on PR #26: the specs entered the coverage denominator without ever being covered (61.2%
+reported against 91.7% real), and their fixture passwords were raised as MAJOR "hard-coded
+password" vulnerabilities, dropping `new_security_rating` to 3 and failing the gate. The specs
+under `test/` never had either problem, because they were already in `sonar.tests`. Three
+properties do it together: `sonar.exclusions` takes the specs out of `sources` so nothing is
+indexed twice, and `sonar.test.inclusions` says what counts as a test inside `test,src`.
+
 `documents/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
 tool, why it is there, and what each pipeline job guards against. It is the long-form companion to
 this section.

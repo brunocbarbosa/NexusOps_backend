@@ -255,6 +255,19 @@ jobs:
           name: coverage
           path: .
 
+      # `sonar.tests` inclui `src` porque os specs unitários moram ao lado do
+      # código, e `sonar.sources=src` sozinho os analisava como código de
+      # produção. Duas consequências, as duas medidas no PR #26: os specs
+      # entravam no denominador de cobertura sem nunca serem cobertos (61,2%
+      # reportados contra 91,7% reais), e as senhas de fixture viravam
+      # "hard-coded password" de severidade MAJOR, derrubando o
+      # `new_security_rating` para 3. Os specs de `test/` nunca sofreram disso
+      # justamente por já estarem em `sonar.tests`.
+      #
+      # As três propriedades trabalham juntas: `exclusions` tira os specs de
+      # `sources` para que nenhum arquivo seja indexado duas vezes, e
+      # `test.inclusions` delimita o que, dentro de `test,src`, é teste.
+      #
       # v6 e não v5: a v5 carrega uma vulnerabilidade high de argument injection
       # (GHSA, corrigida na 6.0.0), e a própria ação imprime esse aviso a cada
       # execução. Aqui o `args` só recebe variáveis de repositório, que apenas um
@@ -268,8 +281,9 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.sources=src
-            -Dsonar.tests=test
-            -Dsonar.exclusions=src/generated/**
+            -Dsonar.tests=test,src
+            -Dsonar.test.inclusions=test/**/*.ts,src/**/*.spec.ts
+            -Dsonar.exclusions=src/generated/**,src/**/*.spec.ts
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info,coverage-integration/lcov.info,coverage-e2e/lcov.info
 
   # ---------------------------------------------------------------------------
