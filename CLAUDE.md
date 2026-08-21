@@ -18,12 +18,14 @@ BullMQ queues and the WebSocket gateway are not written yet.
 
 Other documents, by purpose:
 
-| File                                | Read it when                                                    |
-| ----------------------------------- | --------------------------------------------------------------- |
-| `documents/MAIN.md`                 | implementing anything architectural — the spec                  |
-| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending         |
-| `documents/study/GUIA_CI_CD.md`     | you need the CI/CD setup explained from first principles        |
-| `documents/important/`              | the deep references below — kept together so they stay findable |
+| File                                         | Read it when                                                    |
+| -------------------------------------------- | --------------------------------------------------------------- |
+| `documents/MAIN.md`                          | implementing anything architectural — the spec                  |
+| `documents/CHECKLIST_TESTS_CICD.md`          | you want to know what is done and what is still pending         |
+| `documents/CHECKLIST_USERS_AUTH.md`          | same, for the users and auth slice                              |
+| `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
+| `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
+| `documents/important/`                       | the deep references below — kept together so they stay findable |
 
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on
@@ -150,7 +152,11 @@ before Nest boots, so it wins. That is a behaviour of a dependency rather than o
 so `test/integration/env-precedence.int-spec.ts` pins it.
 
 The image built by the Dockerfile sets only `NODE_ENV`, so anything that runs it — including the
-`docker` job's boot check in CI — has to supply the rest or the process exits on validation. `docker-compose.yml` reads `POSTGRES_*` / `REDIS_PORT` from the same
+`docker` job's boot check in CI — has to supply the rest or the process exits on validation.
+
+What each variable does, which of the four separate readers sees it (`ConfigModule`, `dotenv` in
+the test tiers, `prisma.config.ts`, and `docker compose` — they are unrelated mechanisms), and the
+four places to touch when adding one, are in `documents/study/GUIA_VARIAVEIS_AMBIENTE.md`. `docker-compose.yml` reads `POSTGRES_*` / `REDIS_PORT` from the same
 `.env`, so the compose credentials and `DATABASE_URL` must agree or the app will point at a
 database that does not exist.
 
@@ -387,7 +393,7 @@ under `test/` never had either problem, because they were already in `sonar.test
 properties do it together: `sonar.exclusions` takes the specs out of `sources` so nothing is
 indexed twice, and `sonar.test.inclusions` says what counts as a test inside `test,src`.
 
-`documents/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
+`documents/study/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
 tool, why it is there, and what each pipeline job guards against. It is the long-form companion to
 this section.
 
