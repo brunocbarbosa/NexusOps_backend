@@ -16,14 +16,18 @@ pipeline are in place, and the domain modules are not written yet.
 
 Other documents, by purpose:
 
-| File                                | Read it when                                             |
-| ----------------------------------- | -------------------------------------------------------- |
-| `documents/MAIN.md`                 | implementing anything architectural — the spec           |
-| `documents/DATABASE_MODEL.md`       | touching the schema                                      |
-| `documents/GUIA_CI_CD.md`           | you need the CI/CD setup explained from first principles |
-| `documents/PLANO_TESTS_CICD.md`     | you want the reasoning behind a CI/CD decision           |
-| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending  |
-| `documents/ROTEIRO_TESTS.md`        | never — historical, diverges from this repo in 8 places  |
+| File                                | Read it when                                                 |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `documents/MAIN.md`                 | implementing anything architectural — the spec               |
+| `documents/DATABASE_MODEL.md`       | touching the schema                                          |
+| `documents/GUIA_CI_CD.md`           | you need the CI/CD setup explained from first principles     |
+| `documents/PLANO_TESTS_CICD.md`     | you want the reasoning behind a CI/CD decision               |
+| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending      |
+| `documents/RLS_NOTES.md`            | before implementing Row-Level Security — it is not built yet |
+| `documents/ROTEIRO_TESTS.md`        | never — historical, diverges from this repo in 8 places      |
+
+`src/tenancy/README.md` sits next to the code it describes: the measured behaviour of Prisma 7.9.1
+that the tenant extension depends on. Read it before editing that directory.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
 > starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
@@ -192,76 +196,26 @@ The critical consequence: **BullMQ workers and WebSocket handlers have no HTTP r
 payload and re-established inside the worker before any query runs. This is the single most
 likely place for a tenant leak.
 
-`src/tenancy/` implements both layers' first half. Measured against Prisma 7.9.1, and the design
-depends on all five:
+`src/tenancy/` implements the first of those two layers. Two rules follow from it, and they hold
+everywhere in the codebase:
 
-- **`findUnique` accepts a non-unique extra field in `where`.** `{ where: { id, tenantId } }` is
-  valid and filters correctly, so the extension injects `where.tenantId` uniformly and never
-  rewrites `findUnique` into `findFirst`. Cross-tenant `update`/`delete` surface as `P2025` with the
-  other tenant's row untouched — which makes the API answer 404, not 403, so it does not confirm
-  that another tenant's resource exists.
-- **`PrismaPromise` is lazy, and that will eat your context.** The query is dispatched when the
-  promise is awaited, not when the method is called. So `als.run(store, () => prisma.x.findMany())`
-  dispatches _outside_ the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
-  `storage.run`; do not "simplify" it back to a synchronous wrapper. Symptom when this regresses:
-  `TenantContextMissingError` from code that visibly established a tenant.
-- **Query extensions never fire for nested access.** `include: {}` intercepts only the parent
-  operation, and so does a nested `create`. The extension cannot filter a nested read or fix a
-  nested child's `tenantId`.
-- **That hole is closed in the schema, not in the extension.** Child relations use composite foreign
-  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input _without_
-  a `tenantId` field, so the wrong tenant stops being expressible, and a cross-tenant child cannot
-  exist for a nested read to return. Cost: the two optional relations lose `ON DELETE SET NULL` and
-  become `RESTRICT`, because part of a composite key cannot be nulled while `tenant_id` is
-  `NOT NULL`. Deleting a user therefore requires anonymising `audit_logs.user_id` first.
-- **Scoping every model by default fails closed in both directions.** The extension filters every
-  model except an explicit `TENANT_AGNOSTIC` allowlist. Passing `tenantId` to a model that lacks the
-  column raises `PrismaClientValidationError`, so forgetting to exempt an agnostic model breaks
-  loudly, while forgetting to register a new scoped model leaves it already protected. Unknown
-  operations throw rather than run unfiltered, so a Prisma upgrade that adds one cannot leak.
+- **Never hand-write a tenant filter in a service.** The extension injects it; a hand-written one
+  is a filter that can be wrong or forgotten.
+- **Never reach for a `currentTenantId(): string | undefined`.** It does not exist on purpose,
+  because `?? fallback` is exactly the silent bypass this design prevents. Use `requireTenantId()`,
+  which returns a string or throws, and `runWithoutTenant()` when a read genuinely must be unscoped.
 
-Two things the extension deliberately refuses to make convenient. There is no
-`currentTenantId(): string | undefined`, because `?? fallback` is the silent bypass the design
-exists to prevent — `requireTenantId()` returns a string or throws, and `currentScope()` returns a
-union whose cases must all be handled. And reading `Tenant` unscoped, which the login path needs
-before any tenant identity exists, requires an explicit `runWithoutTenant()`; a merely absent
-context is refused, so a lost context cannot quietly widen into a read of every tenant.
+The extension's measured behaviour against Prisma 7.9.1 — five findings the design depends on,
+including why nested access cannot be intercepted and why that hole is closed in the schema instead
+— is in **`src/tenancy/README.md`**. Read it before editing anything in that directory, and
+re-check it after a Prisma upgrade.
 
-`$queryRaw` / `$executeRaw` are client operations, not model ones, and never reach the extension.
-That, plus a defect in the extension itself, is the entire remaining job for RLS — considerably
-smaller than it looked before these measurements.
-
-RLS will be inert in this project until the application stops connecting as `nexusops`. Two
-mechanisms, and the second is the one that bites — both measured against this repo's own container,
-not taken from documentation:
-
-- The **table owner** bypasses RLS. `ALTER TABLE ... FORCE ROW LEVEL SECURITY` fixes that case.
-- A **superuser** bypasses RLS unconditionally, and `FORCE` does _not_ help. `docker-compose.yml`
-  sets `POSTGRES_USER=nexusops`, and `initdb` makes that role a superuser: `pg_roles` reports
-  `rolsuper = t, rolbypassrls = t`. So with the default `DATABASE_URL`, every policy is dead
-  weight while `pg_policies` still shows the setup as correct — a silent failure that looks like
-  protection.
-
-The fix is a dedicated low-privilege role holding DML only, not owning the tables and not a
-superuser; migrations keep using the owning role. `.env.example` reserves `DATABASE_URL_APP` for it.
-Verified: as `nexusops` a tenant-scoped query returned every tenant's rows even with `FORCE` on; as
-a `NOSUPERUSER NOBYPASSRLS` non-owner it returned only the scoped rows, and zero rows with no tenant set.
-
-**Setting the tenant for RLS must be transaction-scoped, and `SET` cannot do it.** Two traps:
-
-1. `prisma.$executeRaw` always parameterizes interpolated values, and PostgreSQL's `SET` accepts no
-   bind parameters — `` $executeRaw`SET app.tenant_id = ${tenantId}` `` fails every call with
-   `42601: syntax error at or near "$1"`. Use `set_config` instead.
-2. `@prisma/adapter-pg` sends any query outside `$transaction()` straight to the `pg.Pool`, one
-   checkout per call, so a standalone `set_config` and the following query can land on different
-   physical connections — and a session-scoped value lingers on whichever connection last set it.
-   Under concurrency that yields _another single tenant's_ rows, intermittently. Measured on a pool
-   of 4 with 60 concurrent requests: 46 of 60 observed the wrong tenant. Pinning one connection per
-   request and using transaction-local scope brought it to 0 of 60.
-
-So the tenant must be set with `set_config('app.tenant_id', $1, true)` — the third argument is
-`is_local` — inside an **interactive** `$transaction(async (tx) => ...)`, which pins one connection
-and resets the value at commit. The array form of `$transaction` does not give that guarantee.
+**RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
+the code today. Two things will bite whoever writes it, both measured here rather than read in
+documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
+currently connects as one; and setting the tenant outside an interactive `$transaction` lands on a
+different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
+The measurements and the remaining work are in **`documents/RLS_NOTES.md`**.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
