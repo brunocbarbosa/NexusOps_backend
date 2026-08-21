@@ -19,12 +19,9 @@ Other documents, by purpose:
 | File                                | Read it when                                                        |
 | ----------------------------------- | ------------------------------------------------------------------- |
 | `documents/MAIN.md`                 | implementing anything architectural — the spec                      |
-| `documents/DATABASE_MODEL.md`       | touching the schema                                                 |
-| `documents/GUIA_CI_CD.md`           | you need the CI/CD setup explained from first principles            |
-| `documents/PLANO_TESTS_CICD.md`     | you want the reasoning behind a CI/CD decision                      |
 | `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending             |
+| `documents/study/GUIA_CI_CD.md`     | you need the CI/CD setup explained from first principles            |
 | `documents/important/`              | the two deep references below — kept together so they stay findable |
-| `documents/ROTEIRO_TESTS.md`        | never — historical, diverges from this repo in 8 places             |
 
 `documents/important/` holds the two deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on

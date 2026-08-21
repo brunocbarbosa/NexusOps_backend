@@ -9,12 +9,13 @@
 >
 > Documentos vizinhos, com propósitos diferentes:
 >
-> - [`PLANO_TESTS_CICD.md`](./PLANO_TESTS_CICD.md) — o plano de execução, com as decisões e os
->   defeitos encontrados durante a implementação.
-> - [`CHECKLIST_TESTS_CICD.md`](./CHECKLIST_TESTS_CICD.md) — o acompanhamento item a item.
-> - [`../CLAUDE.md`](../CLAUDE.md) — a referência curta e operacional, para consulta rápida.
+> - [`CHECKLIST_TESTS_CICD.md`](../CHECKLIST_TESTS_CICD.md) — o acompanhamento item a item do que
+>   foi implementado e do que continua pendente.
+> - [`important/`](../important/) — as referências profundas: o comportamento medido da extensão de
+>   tenancy e as notas de RLS.
+> - [`../../CLAUDE.md`](../../CLAUDE.md) — a referência curta e operacional, para consulta rápida.
 >
-> Este aqui é o **didático**. Os outros três são registros de execução.
+> Este aqui é o **didático**: ensina. Os outros são referência — consulta pontual, não leitura.
 
 ---
 
