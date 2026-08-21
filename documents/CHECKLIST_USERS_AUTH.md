@@ -222,20 +222,20 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 6 — Documentação
 
-- [ ] `documents/important/USERS.md` — conhecimento medido desta fatia (não tutorial)
-- [ ] `documents/important/README.md` — nova linha na tabela
-- [ ] `CLAUDE.md` — tabela de documentos, a frase de que `src/` ainda é scaffold, e uma seção
+- [x] `documents/important/USERS.md` — conhecimento medido desta fatia (não tutorial)
+- [x] `documents/important/README.md` — nova linha na tabela
+- [x] `CLAUDE.md` — tabela de documentos, a frase de que `src/` ainda é scaffold, e uma seção
       curta em **Architecture** que **aponta** para `USERS.md` em vez de repeti-lo
-- [ ] `.env.example` revisado
-- [ ] Este checklist fechado
+- [x] `.env.example` revisado
+- [x] Este checklist fechado
 
 ### Verificação final
 
-- [ ] `npm run test:all`
-- [ ] `npx eslint "src/**/*.ts"` (read-only; `npm run lint` reescreve) e `npm run format:check`
-- [ ] `npm run build` — `dist/main.js` existe de verdade
-- [ ] Fluxo manual ponta a ponta contra `npm run start:dev`
-- [ ] PR de `feat/users-auth` para `development` com `quality` + `test` verdes
+- [x] `npm run test:all`
+- [x] `npx eslint "src/**/*.ts"` (read-only; `npm run lint` reescreve) e `npm run format:check`
+- [x] `npm run build` — `dist/main.js` existe de verdade
+- [x] Fluxo manual ponta a ponta contra `npm run start:dev`
+- [x] PR de `feat/users-auth` para `development` com `quality` + `test` verdes
 
 ---
 
