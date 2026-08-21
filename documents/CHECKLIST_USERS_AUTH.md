@@ -82,17 +82,23 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 2 — Schema: soft delete e refresh tokens
 
-- [ ] `User.deletedAt DateTime? @map("deleted_at")`
-- [ ] Model `RefreshToken` nas convenções do arquivo: `@@unique([tenantId, id])`, FK composta
+- [x] `User.deletedAt DateTime? @map("deleted_at")`
+- [x] Model `RefreshToken` nas convenções do arquivo: `@@unique([tenantId, id])`, FK composta
       contra `@@unique([tenantId, id])` de `User`, `@@index([tenantId, userId])`,
       `@@map("refresh_tokens")`
-- [ ] Relações inversas em `Tenant` e `User`
-- [ ] Migration `users_auth` criada e `prisma generate` rodado
+- [x] Relações inversas em `Tenant` e `User`
+- [x] Migration `users_auth` criada e `prisma generate` rodado
 
 ### Verificação
 
-- [ ] `npm run test:setup && npm run test:int` — a migration aplica no banco efêmero e os specs
+- [x] `npm run test:setup && npm run test:int` — a migration aplica no banco efêmero e os specs
       de tenancy continuam verdes
+- [x] Regressão nova em `prisma-client.int-spec.ts`: `RefreshToken` entrou no schema **sem**
+      tocar na extension e já nasce escopado, e o `@unique` global de `token_hash` é seguro
+      porque o `findUnique` recebe o `tenantId` injetado — um token do tenant B volta `null`
+- [x] Medido, não suposto: recriar usuário com o e-mail de um soft-deleted falha com `P2002` em
+      `(tenant_id, email)`. É o que justifica a rota de restore em vez de um create novo. Vira
+      teste permanente na Fase 5
 
 ---
 

@@ -7,10 +7,10 @@
 // Without moduleFormat = "cjs" the generated ESM client fails at require() time
 // with "exports is not defined in ES module scope".
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  runtime      = "nodejs"
-  moduleFormat = "cjs"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  runtime             = "nodejs"
+  moduleFormat        = "cjs"
   // CJS resolution: extensionless imports work under ts-node, ts-jest and tsc
   // alike. The default (".js") breaks at require() time because the generated
   // files are TypeScript sources, not compiled JS.
@@ -48,10 +48,11 @@ model Tenant {
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
 
-  users     User[]
-  tickets   Ticket[]
-  comments  Comment[]
-  auditLogs AuditLog[]
+  users         User[]
+  tickets       Ticket[]
+  comments      Comment[]
+  auditLogs     AuditLog[]
+  refreshTokens RefreshToken[]
 
   @@map("tenants")
 }
@@ -67,11 +68,26 @@ model User {
   role         UserRole @default(REQUESTER)
   createdAt    DateTime @default(now()) @map("created_at")
 
-  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  ticketsCreated  Ticket[]   @relation("TicketRequester")
-  ticketsAssigned Ticket[]   @relation("TicketAssignee")
+  // SOFT DELETE, e nao por preferencia de estilo: as FKs de AuditLog e de
+  // Ticket.assignee sao RESTRICT (ver o comentario em AuditLog), entao apagar
+  // um usuario com historico falha no proprio banco. Desativar preserva a
+  // trilha de auditoria e o vinculo dos chamados.
+  //
+  // Consequencia: o e-mail continua ocupando @@unique([tenantId, email]),
+  // entao recriar um usuario com o mesmo e-mail conflita. E por isso que
+  // existe uma rota de restore em vez de so um create novo.
+  //
+  // O filtro `deletedAt: null` vive no service, nao na extension de tenancy:
+  // a extension e sobre tenant, e sobrecarrega-la faria linhas sumirem em
+  // silencio de todo model futuro.
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticketsCreated  Ticket[]       @relation("TicketRequester")
+  ticketsAssigned Ticket[]       @relation("TicketAssignee")
   comments        Comment[]
   auditLogs       AuditLog[]
+  refreshTokens   RefreshToken[]
 
   // Um e-mail nao se repete dentro da mesma empresa, mas pode existir em outra.
   @@unique([tenantId, email])
@@ -99,10 +115,10 @@ model Ticket {
   // A atualizacao segura e updateMany({ where: { id, tenantId, version } }) e nao
   // update(): `update` exige um where unico, e { id, version } nao e unico.
   // count === 0 significa que outro request ja alterou a linha -> 409 Conflict.
-  version     Int          @default(1)
+  version Int @default(1)
 
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // FKs compostas contra @@unique([tenantId, id]) do pai. Isso faz o proprio
   // Postgres rejeitar uma referencia a registro de outro tenant, independente de
@@ -144,12 +160,12 @@ model Comment {
 // 5. AUDIT LOG (trilha de auditoria)
 // ==========================================
 model AuditLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  tenantId   String   @map("tenant_id") @db.Uuid
-  userId     String?  @map("user_id") @db.Uuid
-  entityType String   @map("entity_type") @db.VarChar(50)
-  entityId   String   @map("entity_id") @db.Uuid
-  action     String   @db.VarChar(50)
+  id         String  @id @default(uuid()) @db.Uuid
+  tenantId   String  @map("tenant_id") @db.Uuid
+  userId     String? @map("user_id") @db.Uuid
+  entityType String  @map("entity_type") @db.VarChar(50)
+  entityId   String  @map("entity_id") @db.Uuid
+  action     String  @db.VarChar(50)
 
   // Json do Prisma -> JSONB no PostgreSQL.
   oldValues Json? @map("old_values")
@@ -168,4 +184,43 @@ model AuditLog {
   // frente o indice nao entra no plano de execucao.
   @@index([tenantId, entityType, entityId])
   @@map("audit_logs")
+}
+
+// ==========================================
+// 6. REFRESH TOKEN (rotacao e revogacao)
+// ==========================================
+// Existe para que logout signifique alguma coisa. Um refresh puramente
+// stateless so pode ser invalidado esperando expirar; com a linha aqui, revogar
+// e um UPDATE.
+model RefreshToken {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+
+  // sha256 hex do JWT apresentado, sempre 64 caracteres. Hash e nao o token:
+  // um dump do banco nao vira um conjunto de sessoes utilizaveis.
+  //
+  // sha256 e nao bcrypt de proposito. bcrypt existe para segredo de baixa
+  // entropia escolhido por humano; um token de 256 bits aleatorios nao ganha
+  // nada com KDF lento e pagaria o custo dele a cada rotacao.
+  //
+  // @unique global e seguro: a extension injeta tenantId no where do
+  // findUnique, entao um token de outro tenant volta como nao-encontrado.
+  tokenHash String @unique @map("token_hash") @db.VarChar(64)
+
+  expiresAt DateTime  @map("expires_at")
+  // Nulo enquanto valido. Preenchido no logout, na rotacao e na deteccao de
+  // reuso -- que revoga a familia inteira do usuario de uma vez.
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Cascade e nao Restrict: o token nao e historico, e a exclusao de usuario e
+  // soft de qualquer forma. Um hard delete futuro nao deve tropecar nisto.
+  user   User   @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  // Para revogar a familia inteira de um usuario numa tacada.
+  @@index([tenantId, userId])
+  @@map("refresh_tokens")
 }

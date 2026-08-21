@@ -27,6 +27,7 @@ describe('createPrismaClient (application client)', () => {
   const run = randomUUID();
   let tenantA: string;
   let tenantB: string;
+  let userA: string;
 
   beforeAll(async () => {
     prisma = createPrismaClient(process.env.DATABASE_URL as string);
@@ -39,7 +40,7 @@ describe('createPrismaClient (application client)', () => {
           data: { name: `Tenant ${label}`, domain: `${label}-${run}.example` },
         }),
       );
-      await runWithTenant(tenant.id, () =>
+      const user = await runWithTenant(tenant.id, () =>
         prisma.user.create({
           data: tenantScoped({
             email: `owner@${label}.example`,
@@ -47,11 +48,13 @@ describe('createPrismaClient (application client)', () => {
           }),
         }),
       );
-      return tenant.id;
+      return { tenant: tenant.id, user: user.id };
     };
 
-    tenantA = await seed('client-a');
-    tenantB = await seed('client-b');
+    const a = await seed('client-a');
+    const b = await seed('client-b');
+    [tenantA, userA] = [a.tenant, a.user];
+    tenantB = b.tenant;
   });
 
   afterAll(async () => {
@@ -142,5 +145,36 @@ describe('createPrismaClient (application client)', () => {
     );
 
     expect(rows[0].count).toBeGreaterThan(0n);
+  });
+
+  // RefreshToken was added to the schema without touching the extension, which
+  // is the property worth pinning: everything absent from TENANT_AGNOSTIC is
+  // scoped, so forgetting to register a new model leaves it already protected
+  // rather than leaking. A new model that leaks would fail this test.
+  it('scopes a model added after the extension was written', async () => {
+    const tokenHash = `a${run.replace(/-/g, '')}`.padEnd(64, '0').slice(0, 64);
+
+    await runWithTenant(tenantA, () =>
+      prisma.refreshToken.create({
+        data: tenantScoped({
+          userId: userA,
+          tokenHash,
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
+      }),
+    );
+
+    // The unique index on token_hash is global, which is only safe because the
+    // extension injects tenantId into the findUnique `where` — the schema
+    // comment says so, and this is what proves it.
+    const asOwner = await runWithTenant(tenantA, () =>
+      prisma.refreshToken.findUnique({ where: { tokenHash } }),
+    );
+    const asStranger = await runWithTenant(tenantB, () =>
+      prisma.refreshToken.findUnique({ where: { tokenHash } }),
+    );
+
+    expect(asOwner?.tenantId).toBe(tenantA);
+    expect(asStranger).toBeNull();
   });
 });
