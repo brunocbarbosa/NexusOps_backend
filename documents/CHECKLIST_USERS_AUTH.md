@@ -235,7 +235,28 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 - [x] `npx eslint "src/**/*.ts"` (read-only; `npm run lint` reescreve) e `npm run format:check`
 - [x] `npm run build` — `dist/main.js` existe de verdade
 - [x] Fluxo manual ponta a ponta contra `npm run start:dev`
-- [x] PR de `feat/users-auth` para `development` com `quality` + `test` verdes
+- [x] PR de `feat/users-auth` para `development` ([#26](https://github.com/brunocbarbosa/NexusOps_backend/pull/26))
+      com os dez checks verdes
+
+### O quality gate do Sonar reprovou duas vezes, e valeu a pena
+
+Nada disso estava no plano, e as duas causas foram medidas pela API do SonarCloud em vez de
+adivinhadas — `api/qualitygates/project_status` diz qual condição falhou e com que número.
+
+- [x] **Só o tier unitário gerava cobertura** → 54% reportados. Controllers, guards, `JwtStrategy`
+      e `RefreshTokenService` são exercitados pelos tiers de integração e e2e **por escolha de
+      desenho**, então contavam como não cobertos. Escrever teste unitário para satisfazer o número
+      teria duplicado asserção de e2e no nível errado. Os três agora rodam com `--coverage` e o
+      `sonar.javascript.lcov.reportPaths` lista os três — sem ferramenta de merge, porque o
+      `rootDir` fixado na raiz faz os relatórios nomearem os mesmos arquivos do mesmo jeito.
+      Fecha a pendência que estava aberta no `CHECKLIST_TESTS_CICD.md`
+- [x] **Os specs unitários moram em `src/`, e o `sonar.sources=src` os analisava como produção.**
+      Uma causa, dois sintomas: eles entravam no denominador de cobertura sem nunca serem cobertos
+      (61,2% contra 91,7% reais), e as senhas de fixture viravam `hard-coded password` de
+      severidade MAJOR, derrubando o `new_security_rating` para 3. Os specs de `test/` nunca
+      sofreram disso — já estavam em `sonar.tests`, que é a pista. Corrigido por **classificação**:
+      suprimir uma senha de fixture para agradar scanner seria inverter a prioridade
+- [x] Gate final: `new_coverage` **92,6%**, `new_security_rating` 1, duplicação 0,0%
 
 ---
 
