@@ -10,8 +10,25 @@ deliver CRUD features. `documents/MAIN.md` is the authoritative project specific
 Portuguese); read it before implementing anything architectural, since the "why" behind each
 technology choice is recorded there.
 
-The application code is still a bare NestJS scaffold (`src/app.*`). Infrastructure, dependencies,
-and tooling are in place; the domain modules are not written yet.
+`src/tenancy/` is real, measured code and the load-bearing part of the project. Everything else
+under `src/` is still the NestJS scaffold (`src/app.*`); infrastructure, tooling and the CI/CD
+pipeline are in place, and the domain modules are not written yet.
+
+Other documents, by purpose:
+
+| File                                | Read it when                                             |
+| ----------------------------------- | -------------------------------------------------------- |
+| `documents/MAIN.md`                 | implementing anything architectural — the spec           |
+| `documents/DATABASE_MODEL.md`       | touching the schema                                      |
+| `documents/GUIA_CI_CD.md`           | you need the CI/CD setup explained from first principles |
+| `documents/PLANO_TESTS_CICD.md`     | you want the reasoning behind a CI/CD decision           |
+| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending  |
+| `documents/ROTEIRO_TESTS.md`        | never — historical, diverges from this repo in 8 places  |
+
+> **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
+> starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
+> The `pre-commit` hook also rewrites staged files (`eslint --fix` via lint-staged), so a commit
+> can legitimately contain more than you staged.
 
 ## Commands
 
@@ -95,6 +112,14 @@ database — they truncate and reseed, so pointing them at `.env` wipes local da
 `npm run test:unit` needs nothing running. The other two need `npm run test:setup` first (or
 `infra:test:up` plus `prisma migrate deploy`), and CI runs exactly those same scripts.
 
+**`src/app.setup.ts` is the second chokepoint in this repository**, and it exists for the same
+reason as the tenancy one. `configureApp(app)` holds everything that turns a bare Nest application
+into _this_ application — today the global `ValidationPipe`, tomorrow filters, interceptors, a
+route prefix. `src/main.ts` calls it and so does `test/utils/create-test-app.ts`. Register a pipe
+or filter directly in `main.ts` and every e2e assertion about it becomes a lie: the test would be
+exercising a differently-configured application than the one that ships. `src/app.setup.spec.ts`
+guards that the `ValidationPipe` is still there.
+
 ## Environment
 
 `.env` holds local values and is gitignored; `.env.example` is the documented template — keep it in
@@ -105,8 +130,10 @@ database that does not exist.
 Prisma 7 does **not** read `.env` on its own: `prisma.config.ts` imports `dotenv/config`, and that
 is the only reason the CLI sees `DATABASE_URL`. The datasource block in `prisma/schema.prisma`
 therefore has no `url` — the URL is supplied by `prisma.config.ts`. Don't "fix" the schema by
-adding `env("DATABASE_URL")` back to it. Jest picks up `.env` only in the e2e config, via
-`setupFiles: ["dotenv/config"]`.
+adding `env("DATABASE_URL")` back to it. Jest never reads `.env`. The unit tier has no `setupFiles` at all; the
+integration and e2e tiers load `dotenv/config`, and their npm scripts point `DOTENV_CONFIG_PATH`
+at `.env.test`. Adding `setupFiles: ["dotenv/config"]` to the unit tier would silently give it a
+database connection it is not supposed to have.
 
 ## Prisma 7 wiring
 
@@ -259,6 +286,24 @@ NestJS 11 on Node 24, TypeScript in `strict` mode with `module`/`moduleResolutio
 `npm run prisma:generate` after cloning or after any schema change, or imports will fail to
 resolve.
 
+**Two lines of `tsconfig.build.json` are load-bearing and look like clutter.** `rootDir: "./src"`
+keeps `prisma.config.ts` out of the program — without it tsc infers a rootDir of `.`, the build
+lands in `dist/src/main.js`, and `start:prod` plus the Dockerfile `CMD` both point at a file that
+is not there. Setting it moves the incremental cache to the repository root, outside anything
+`nest build` cleans, so `tsBuildInfoFile` pins it back inside `dist/`. Without that pin,
+`deleteOutDir` wipes `dist/` while the cache survives insisting the build is current: **a clean
+build emits zero files and exits 0**, and `COPY` of an empty `dist/` raises no error either. That
+is why CI boots the image and curls it — the smoke test runs `scripts/docker-smoke.js`, not
+`dist/main`, and would not catch it.
+
+**The Dockerfile deletes packages on purpose** (778MB → 406MB): the Prisma CLI and Studio, which
+survive `--omit=dev` because `@prisma/client@7` declares them as _optional_ peers, plus every WASM
+query compiler that is not PostgreSQL. All of it loads lazily, so a wrong prune fails on the first
+real query rather than at boot. `scripts/docker-smoke.js` runs inside the image against a live
+database and issues both a `$queryRaw` and a model query — the model query is the one that reaches
+the compiler. Re-check the prune when upgrading Prisma; the smoke test is what turns that from a
+hope into a check.
+
 `package.json` pins an npm `overrides` entry forcing `deepmerge-ts` to `^8.0.1`. This resolves a
 high-severity advisory reachable through the Prisma CLI; removing it reintroduces the
 vulnerability, and the alternative was downgrading Prisma. Re-check whether it is still needed
@@ -266,7 +311,7 @@ when upgrading Prisma.
 
 Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
 (`passport-jwt`) and `bcrypt` for password hashing. Validation uses `class-validator` /
-`class-transformer`, which need a global `ValidationPipe` — not yet registered in `src/main.ts`.
+`class-transformer` through the global `ValidationPipe`, registered in `src/app.setup.ts`.
 
 ## CI and branch flow
 
@@ -293,7 +338,13 @@ The pipeline runs seven jobs. Three are worth knowing about before you touch the
   `commitlint.config.js` exempts commits carrying Dependabot's `Signed-off-by` trailer: its subject
   is sentence-case and not configurable, so without the exemption every bot PR is permanently red.
 
-`sonar` is written and inert until the repository variable `SONAR_ENABLED` is set to `true`.
+`sonar` is live: SonarCloud analyses every PR against a quality gate on **new** code (80% coverage,
+3% duplication), fed by the coverage artifact the `test` job uploads. Two things keep it working and
+both look like bugs when they break. It skips `dependabot[bot]`, because Dependabot pull requests
+get their secrets from a separate store and `SONAR_TOKEN` arrives empty — the job runs, since `vars`
+do arrive, and then fails with "Not authorized". And SonarCloud's **Automatic Analysis must stay
+off**: it refuses CI-based analysis while enabled, and it scans the whole repository, vendored
+Prisma docs included, where the job scopes itself to `src`.
 
 `documents/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
 tool, why it is there, and what each pipeline job guards against. It is the long-form companion to
