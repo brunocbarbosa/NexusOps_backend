@@ -19,6 +19,7 @@ import type {
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { HashingService } from './hashing.service';
+import { INVALID_REFRESH, RefreshTokenService } from './refresh-token.service';
 
 /**
  * One message for every way a login can fail.
@@ -32,6 +33,7 @@ const INVALID_CREDENTIALS = 'Invalid credentials';
 
 export type AuthResult = {
   accessToken: string;
+  refreshToken: string;
   user: UserResponse;
 };
 
@@ -41,6 +43,7 @@ export class AuthService {
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
     private readonly hashing: HashingService,
     private readonly jwt: JwtService,
+    private readonly refreshTokens: RefreshTokenService,
   ) {}
 
   /**
@@ -139,6 +142,53 @@ export class AuthService {
     return user;
   }
 
+  /**
+   * Exchanges a refresh token for a new pair, and rotates it.
+   *
+   * The scope comes from the token itself: refreshing happens precisely when
+   * the access token has expired, so there is no authenticated user for
+   * `TenantContextInterceptor` to have read and no scope to inherit.
+   */
+  async refresh(refreshToken: string): Promise<AuthResult> {
+    const payload = await this.refreshTokens.verify(refreshToken);
+
+    return runWithTenant(payload.tenantId, async () => {
+      const outcome = await this.refreshTokens.consume(refreshToken);
+
+      if (outcome === 'unknown') {
+        throw new UnauthorizedException(INVALID_REFRESH);
+      }
+
+      // A token that was already spent is being presented a second time. The
+      // legitimate holder and whoever copied it are indistinguishable from
+      // here, so every session of that user ends and both have to log in
+      // again. Doing nothing would leave the thief with a working chain.
+      if (outcome === 'reused') {
+        await this.refreshTokens.revokeAllFor(payload.sub);
+        throw new UnauthorizedException(INVALID_REFRESH);
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: outcome.userId },
+      });
+
+      // Same freshness check JwtStrategy makes: a week-long refresh token must
+      // not outlive the account it belongs to.
+      if (!user || user.deletedAt !== null) {
+        throw new UnauthorizedException(INVALID_REFRESH);
+      }
+
+      return this.issueTokens(user);
+    });
+  }
+
+  /** Ends one session. Silent about tokens that are not the caller's. */
+  async logout(refreshToken: string, user: AuthenticatedUser): Promise<void> {
+    await runWithTenant(user.tenantId, () =>
+      this.refreshTokens.revoke(refreshToken, user.id),
+    );
+  }
+
   private async issueTokens(user: User): Promise<AuthResult> {
     const payload: AccessTokenPayload = {
       sub: user.id,
@@ -147,9 +197,15 @@ export class AuthService {
       role: user.role,
     };
 
-    return {
-      accessToken: await this.jwt.signAsync(payload),
-      user: toUserResponse(user),
-    };
+    // The refresh token is recorded in a tenant-scoped table, so this needs a
+    // scope. login() and register() both call this from outside one — login
+    // has just left the tenant lookup, and register's transaction has already
+    // closed — so it is opened here rather than at three call sites.
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwt.signAsync(payload),
+      runWithTenant(user.tenantId, () => this.refreshTokens.issue(user.id)),
+    ]);
+
+    return { accessToken, refreshToken, user: toUserResponse(user) };
   }
 }

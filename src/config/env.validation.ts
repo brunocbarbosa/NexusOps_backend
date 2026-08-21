@@ -60,6 +60,18 @@ export class EnvironmentVariables {
   })
   JWT_EXPIRES_IN: string;
 
+  // A separate key, not the same one with a longer expiry. Access and refresh
+  // tokens carry almost the same claims, so under one key a refresh token —
+  // valid for days — is accepted as a bearer token by JwtStrategy, and the
+  // short access-token lifetime stops meaning anything. With two keys the
+  // signature check refuses it, and no `type` claim has to be remembered.
+  @IsString()
+  @MinLength(16, {
+    message:
+      'JWT_REFRESH_SECRET must be at least 16 characters; generate one with `openssl rand -base64 48`',
+  })
+  JWT_REFRESH_SECRET: string;
+
   @Matches(DURATION, {
     message: 'JWT_REFRESH_EXPIRES_IN must look like 15m, 24h or 7d',
   })
@@ -106,13 +118,26 @@ export function validateEnv(
 
   // Not a class-validator constraint because it depends on another field, and a
   // cross-field decorator would be more machinery than one comparison deserves.
+  if (validated.NODE_ENV === NodeEnv.Production) {
+    for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {
+      if (validated[key] === PLACEHOLDER_JWT_SECRET) {
+        problems.push(
+          `  - ${key}: still the .env.example placeholder, which is public. ` +
+            'Generate a real one with `openssl rand -base64 48`',
+        );
+      }
+    }
+  }
+
+  // Setting both to the same value silently undoes the separation the two keys
+  // exist for, and nothing downstream would ever complain.
   if (
-    validated.NODE_ENV === NodeEnv.Production &&
-    validated.JWT_SECRET === PLACEHOLDER_JWT_SECRET
+    validated.JWT_SECRET &&
+    validated.JWT_SECRET === validated.JWT_REFRESH_SECRET
   ) {
     problems.push(
-      '  - JWT_SECRET: still the .env.example placeholder, which is public. ' +
-        'Generate a real one with `openssl rand -base64 48`',
+      '  - JWT_REFRESH_SECRET: must differ from JWT_SECRET, or a refresh token ' +
+        'is accepted as an access token and the short access lifetime is pointless',
     );
   }
 

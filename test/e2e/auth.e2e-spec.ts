@@ -11,6 +11,7 @@ import { bodyOf } from '../utils/response-body';
 
 type AuthBody = {
   accessToken: string;
+  refreshToken: string;
   user: { id: string; email: string; role: UserRole; deletedAt: string | null };
 };
 
@@ -56,6 +57,7 @@ describe('Auth (e2e)', () => {
 
       const body = bodyOf<AuthBody>(response);
       expect(body.accessToken).toEqual(expect.any(String));
+      expect(body.refreshToken).toEqual(expect.any(String));
       expect(body.user).toMatchObject({
         email: payload.email,
         role: UserRole.ADMIN,
@@ -211,6 +213,178 @@ describe('Auth (e2e)', () => {
       await http()
         .get('/auth/me')
         .set('Authorization', `Bearer ${forged}`)
+        .expect(401);
+    });
+  });
+
+  describe('POST /auth/refresh', () => {
+    const payload = registration('refresh');
+
+    const freshSession = async () => {
+      const response = await http()
+        .post('/auth/login')
+        .send({
+          tenantDomain: payload.tenantDomain,
+          email: payload.email,
+          password: payload.password,
+        })
+        .expect(200);
+      return bodyOf<AuthBody>(response);
+    };
+
+    beforeAll(async () => {
+      await http().post('/auth/register').send(payload).expect(201);
+    });
+
+    it('exchanges a refresh token for a working new pair', async () => {
+      const session = await freshSession();
+
+      const refreshed = bodyOf<AuthBody>(
+        await http()
+          .post('/auth/refresh')
+          .send({ refreshToken: session.refreshToken })
+          .expect(200),
+      );
+
+      expect(refreshed.refreshToken).not.toBe(session.refreshToken);
+      await http()
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${refreshed.accessToken}`)
+        .expect(200);
+    });
+
+    it('rotates: the token just used stops working', async () => {
+      const session = await freshSession();
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: session.refreshToken })
+        .expect(200);
+
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: session.refreshToken })
+        .expect(401);
+    });
+
+    /**
+     * Reuse detection, end to end. Replaying a spent token means two parties
+     * hold it and neither can be told from the other, so the chain that was
+     * issued from it dies too — otherwise the thief keeps refreshing forever
+     * beside the legitimate user.
+     */
+    it('kills the successor chain when a spent token is replayed', async () => {
+      const session = await freshSession();
+      const successor = bodyOf<AuthBody>(
+        await http()
+          .post('/auth/refresh')
+          .send({ refreshToken: session.refreshToken })
+          .expect(200),
+      );
+
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: session.refreshToken })
+        .expect(401);
+
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: successor.refreshToken })
+        .expect(401);
+    });
+
+    /**
+     * The reason JWT_REFRESH_SECRET exists.
+     *
+     * Access and refresh tokens carry nearly the same claims, so signed with
+     * one key the refresh token — good for seven days — would authenticate as a
+     * bearer token and the fifteen-minute access lifetime would mean nothing.
+     * Two keys make the signature check refuse it, with no `type` claim for
+     * anyone to forget.
+     */
+    it('does not accept a refresh token as a bearer token', async () => {
+      const session = await freshSession();
+
+      await http()
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${session.refreshToken}`)
+        .expect(401);
+    });
+
+    // And the other direction, which the token-hash lookup covers on its own.
+    it('does not accept an access token as a refresh token', async () => {
+      const session = await freshSession();
+
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: session.accessToken })
+        .expect(401);
+    });
+
+    it('rejects a body that is not a JWT with 400', async () => {
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: 'not-a-jwt' })
+        .expect(400);
+    });
+  });
+
+  describe('POST /auth/logout', () => {
+    const payload = registration('logout');
+
+    beforeAll(async () => {
+      await http().post('/auth/register').send(payload).expect(201);
+    });
+
+    const freshSession = async () =>
+      bodyOf<AuthBody>(
+        await http()
+          .post('/auth/login')
+          .send({
+            tenantDomain: payload.tenantDomain,
+            email: payload.email,
+            password: payload.password,
+          })
+          .expect(200),
+      );
+
+    it('answers 204 and makes the refresh token unusable', async () => {
+      const session = await freshSession();
+
+      await http()
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${session.accessToken}`)
+        .send({ refreshToken: session.refreshToken })
+        .expect(204);
+
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: session.refreshToken })
+        .expect(401);
+    });
+
+    // Ending one session must not end the others: a phone logging out should
+    // not sign the laptop out too.
+    it('leaves the caller other sessions alone', async () => {
+      const [phone, laptop] = [await freshSession(), await freshSession()];
+
+      await http()
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${phone.accessToken}`)
+        .send({ refreshToken: phone.refreshToken })
+        .expect(204);
+
+      await http()
+        .post('/auth/refresh')
+        .send({ refreshToken: laptop.refreshToken })
+        .expect(200);
+    });
+
+    it('requires authentication', async () => {
+      const session = await freshSession();
+
+      await http()
+        .post('/auth/logout')
+        .send({ refreshToken: session.refreshToken })
         .expect(401);
     });
   });

@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { HashingService } from './hashing.service';
 import { JwtStrategy } from './jwt.strategy';
+import { RefreshTokenService } from './refresh-token.service';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { JwtStrategy } from './jwt.strategy';
     AuthService,
     HashingService,
     JwtStrategy,
+    RefreshTokenService,
     // Global, and in this order: RolesGuard reads the user that JwtAuthGuard
     // put on the request, and Nest runs global guards in declaration order.
     //

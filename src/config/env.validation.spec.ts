@@ -7,6 +7,7 @@ describe('validateEnv', () => {
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/db?schema=public',
     JWT_SECRET: 'a-secret-long-enough-to-pass',
     JWT_EXPIRES_IN: '15m',
+    JWT_REFRESH_SECRET: 'a-different-secret-long-enough',
     JWT_REFRESH_EXPIRES_IN: '7d',
     BCRYPT_SALT_ROUNDS: '4',
   };
@@ -61,14 +62,26 @@ describe('validateEnv', () => {
 
   // The placeholder is committed in .env.example, so it is public knowledge and
   // anyone could mint a token for any tenant with it.
-  it('refuses the .env.example placeholder secret in production', () => {
+  it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET'])(
+    'refuses the .env.example placeholder in %s in production',
+    (key) => {
+      expect(() =>
+        validateEnv({
+          ...valid,
+          NODE_ENV: 'production',
+          [key]: 'change-me-in-every-environment',
+        }),
+      ).toThrow(/placeholder/);
+    },
+  );
+
+  // Two keys that are equal are one key, and then a refresh token valid for
+  // days is accepted as a bearer token — silently, since nothing downstream
+  // would notice.
+  it('refuses a refresh secret equal to the access secret', () => {
     expect(() =>
-      validateEnv({
-        ...valid,
-        NODE_ENV: 'production',
-        JWT_SECRET: 'change-me-in-every-environment',
-      }),
-    ).toThrow(/placeholder/);
+      validateEnv({ ...valid, JWT_REFRESH_SECRET: valid.JWT_SECRET }),
+    ).toThrow(/must differ from JWT_SECRET/);
   });
 
   it('tolerates the placeholder outside production', () => {

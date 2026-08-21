@@ -6,6 +6,7 @@ import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { currentScope } from '../tenancy/tenant-context';
 import { AuthService } from './auth.service';
 import { HashingService } from './hashing.service';
+import { RefreshTokenService } from './refresh-token.service';
 
 describe('AuthService', () => {
   const tenant = {
@@ -34,7 +35,7 @@ describe('AuthService', () => {
 
   let prisma: {
     tenant: { findUnique: jest.Mock };
-    user: { findFirst: jest.Mock };
+    user: { findFirst: jest.Mock; findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let hashing: {
@@ -43,12 +44,19 @@ describe('AuthService', () => {
     compareWithDecoy: jest.Mock;
   };
   let jwt: { signAsync: jest.Mock };
+  let refreshTokens: {
+    issue: jest.Mock;
+    verify: jest.Mock;
+    consume: jest.Mock;
+    revokeAllFor: jest.Mock;
+    revoke: jest.Mock;
+  };
   let service: AuthService;
 
   beforeEach(() => {
     prisma = {
       tenant: { findUnique: jest.fn() },
-      user: { findFirst: jest.fn() },
+      user: { findFirst: jest.fn(), findUnique: jest.fn() },
       $transaction: jest.fn(),
     };
     hashing = {
@@ -57,11 +65,19 @@ describe('AuthService', () => {
       compareWithDecoy: jest.fn().mockResolvedValue(false),
     };
     jwt = { signAsync: jest.fn().mockResolvedValue('signed.access.token') };
+    refreshTokens = {
+      issue: jest.fn().mockResolvedValue('signed.refresh.token'),
+      verify: jest.fn(),
+      consume: jest.fn(),
+      revokeAllFor: jest.fn().mockResolvedValue(1),
+      revoke: jest.fn(),
+    };
 
     service = new AuthService(
       prisma as unknown as ExtendedPrismaClient,
       hashing as unknown as HashingService,
       jwt as unknown as JwtService,
+      refreshTokens as unknown as RefreshTokenService,
     );
   });
 
@@ -229,6 +245,101 @@ describe('AuthService', () => {
       await expect(
         service.register({ ...credentials, tenantName: 'Acme' }),
       ).rejects.toBe(boom);
+    });
+  });
+
+  describe('refresh', () => {
+    const payload = { sub: 'user-a', tenantId: 'tenant-a', jti: 'j', exp: 0 };
+
+    beforeEach(() => {
+      refreshTokens.verify.mockResolvedValue(payload);
+      prisma.user.findUnique.mockResolvedValue(user);
+    });
+
+    it('rotates: the presented token is consumed and a new pair comes back', async () => {
+      refreshTokens.consume.mockResolvedValue({ userId: 'user-a' });
+
+      const result = await service.refresh('presented.refresh.token');
+
+      expect(refreshTokens.consume).toHaveBeenCalledWith(
+        'presented.refresh.token',
+      );
+      expect(result.accessToken).toBe('signed.access.token');
+      expect(result.refreshToken).toBe('signed.refresh.token');
+    });
+
+    it('opens the tenant scope from the token, since no request carries one', async () => {
+      refreshTokens.consume.mockImplementation(() => {
+        expect(currentScope()).toEqual({
+          kind: 'tenant',
+          tenantId: 'tenant-a',
+        });
+        return Promise.resolve({ userId: 'user-a' });
+      });
+
+      await service.refresh('presented.refresh.token');
+
+      expect(refreshTokens.consume).toHaveBeenCalled();
+    });
+
+    it('refuses a token nobody issued', async () => {
+      refreshTokens.consume.mockResolvedValue('unknown');
+
+      await expect(service.refresh('made.up.token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(refreshTokens.revokeAllFor).not.toHaveBeenCalled();
+    });
+
+    // The point of rotation. A spent token coming back means two parties hold
+    // it, and there is no way to tell which one is the owner — so both lose
+    // every session rather than the thief keeping a working chain.
+    it('ends every session of the user when a spent token is replayed', async () => {
+      refreshTokens.consume.mockResolvedValue('reused');
+
+      await expect(service.refresh('spent.refresh.token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(refreshTokens.revokeAllFor).toHaveBeenCalledWith('user-a');
+    });
+
+    it.each([
+      ['the user is gone', null],
+      ['the user is soft-deleted', { ...user, deletedAt: new Date() }],
+    ])('refuses when %s', async (_label, found) => {
+      refreshTokens.consume.mockResolvedValue({ userId: 'user-a' });
+      prisma.user.findUnique.mockResolvedValue(found);
+
+      await expect(service.refresh('presented.refresh.token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('refuses a token that fails verification without touching the database', async () => {
+      refreshTokens.verify.mockRejectedValue(new UnauthorizedException());
+
+      await expect(service.refresh('forged.token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(refreshTokens.consume).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the presented token, scoped to the caller', async () => {
+      const caller = {
+        id: 'user-a',
+        tenantId: 'tenant-a',
+        email: 'admin@acme.com',
+        role: UserRole.ADMIN,
+      };
+
+      await service.logout('some.refresh.token', caller);
+
+      expect(refreshTokens.revoke).toHaveBeenCalledWith(
+        'some.refresh.token',
+        'user-a',
+      );
     });
   });
 });

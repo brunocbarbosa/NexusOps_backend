@@ -148,15 +148,34 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 4 — Refresh, rotação e logout
 
-- [ ] Refresh token como JWT `{ sub, tenantId, jti }`; a linha guarda o **sha256** do token
-- [ ] `POST /auth/refresh` público, com rotação (revoga a atual, emite par novo)
-- [ ] Detecção de reúso: token já revogado → revoga todos os do usuário e devolve 401
-- [ ] `POST /auth/logout` autenticado, revoga o token apresentado
+- [x] Refresh token como JWT `{ sub, tenantId, jti }`; a linha guarda o **sha256** do token
+- [x] `POST /auth/refresh` público, com rotação (revoga a atual, emite par novo)
+- [x] Detecção de reúso: token já revogado → revoga todos os do usuário e devolve 401
+- [x] `POST /auth/logout` autenticado, revoga o token apresentado
 
 ### Verificação
 
-- [ ] `npm run test:e2e` — login → refresh → o antigo vira 401; reusar o antigo invalida o novo;
-      logout invalida o refresh
+- [x] `npm run test:e2e` — login → refresh → o antigo vira 401; reusar o antigo invalida o novo;
+      logout invalida o refresh; logout de uma sessão não derruba as outras
+- [x] `test/integration/refresh-token.int-spec.ts` — cinco `consume()` simultâneos no mesmo token
+      e **exatamente um** ganha. É uma afirmação de concorrência, então não dá para verificar
+      lendo o código
+
+### Não estava no plano
+
+- [x] `JWT_REFRESH_SECRET`, uma chave separada e não a mesma com validade maior. Access e refresh
+      carregam quase as mesmas claims, então sob uma chave só o refresh token — válido por dias —
+      é aceito como bearer pelo `JwtStrategy` e os 15 minutos do access deixam de significar
+      alguma coisa. Com duas chaves a checagem de assinatura recusa, sem depender de ninguém
+      lembrar de uma claim `type`. O `validateEnv` recusa as duas iguais
+- [x] `.env.example`, `.env.test` e o boot check da CI atualizados com a variável nova. O `.env`
+      local (gitignored) também, senão o `start:dev` parava de subir
+- [x] `consume()` como um único `updateMany` filtrado por `revokedAt: null`, não read-then-write.
+      Com read-then-write dois refreshes simultâneos veem `null`, os dois rotacionam e a detecção
+      de reúso nunca dispara — que é exatamente o caso para o qual ela existe
+- [x] `expiresAt` lido de volta do `exp` do token assinado em vez de reparsear a string de
+      duração: uma fonte de verdade, e a linha não pode alegar validade diferente do token que
+      descreve
 
 ---
 
