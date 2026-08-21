@@ -295,6 +295,10 @@ The pipeline runs seven jobs. Three are worth knowing about before you touch the
 
 `sonar` is written and inert until the repository variable `SONAR_ENABLED` is set to `true`.
 
+`documents/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
+tool, why it is there, and what each pipeline job guards against. It is the long-form companion to
+this section.
+
 ## Repo conventions
 
 `prisma init` installed vendor-maintained Prisma skill files, tracked by `skills-lock.json`.

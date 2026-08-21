@@ -4,6 +4,10 @@
 > [`CHECKLIST_TESTS_CICD.md`](./CHECKLIST_TESTS_CICD.md); o `ROTEIRO_TESTS.md` é a visão
 > original, e a tabela de correções abaixo registra onde ele diverge deste repositório.
 >
+> Se o que você quer é **entender** o que foi montado, e não acompanhar a execução, comece pelo
+> [`GUIA_CI_CD.md`](./GUIA_CI_CD.md) — a explicação didática de cada ferramenta, do pipeline e
+> das configurações do GitHub, escrita para quem está vendo isso pela primeira vez.
+>
 > | Fase                                  | Estado       | Commit    |
 > | ------------------------------------- | ------------ | --------- |
 > | 0 — Branch e visibilidade             | ✅ concluída | `56b74ff` |
