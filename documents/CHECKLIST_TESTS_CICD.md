@@ -3,6 +3,8 @@
 Acompanhamento item a item da implementação. O plano completo — com o porquê de cada decisão,
 a tabela de correções ao `ROTEIRO_TESTS.md` e as notas de **Como saiu** de cada fase concluída —
 está em [`PLANO_TESTS_CICD.md`](./PLANO_TESTS_CICD.md).
+A explicação didática de tudo que foi montado — cada ferramenta, o pipeline, as configurações do
+GitHub — está em [`GUIA_CI_CD.md`](./GUIA_CI_CD.md).
 
 Marcar cada item ao concluir. Cada fase termina com verificação + commit + checkpoint.
 
