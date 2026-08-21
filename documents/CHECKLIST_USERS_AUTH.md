@@ -181,22 +181,42 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 5 — CRUD de usuários
 
-- [ ] `POST /users` (ADMIN) — e-mail de usuário soft-deleted → 409 apontando o restore
-- [ ] `GET /users` (ADMIN, AGENT) — paginado; `includeDeleted` só para ADMIN
-- [ ] `GET /users/:id` (autenticado) — outro tenant → 404, nunca 403
-- [ ] `PATCH /users/:id` (ADMIN) — não aceita `passwordHash` nem `tenantId`
-- [ ] `PATCH /users/me/password` — exige `currentPassword`, revoga os refresh tokens do usuário
-- [ ] `DELETE /users/:id` (ADMIN) — soft delete; recusa auto-exclusão e o último ADMIN ativo
-- [ ] `POST /users/:id/restore` (ADMIN)
-- [ ] Nenhum filtro de tenant escrito à mão em lugar nenhum do módulo
-- [ ] `passwordHash` nunca sai na resposta — mapeamento explícito, não `exclude` implícito
-- [ ] O filtro `deletedAt: null` fica no service, **não** na extension
+- [x] `POST /users` (ADMIN) — e-mail de usuário soft-deleted → 409 apontando o restore
+- [x] `GET /users` (ADMIN, AGENT) — paginado; `includeDeleted` só para ADMIN
+- [x] `GET /users/:id` (autenticado) — outro tenant → 404, nunca 403
+- [x] `PATCH /users/:id` (ADMIN) — não aceita `passwordHash` nem `tenantId`
+- [x] `PATCH /users/me/password` — exige `currentPassword`, revoga os refresh tokens do usuário
+- [x] `DELETE /users/:id` (ADMIN) — soft delete; recusa auto-exclusão e o último ADMIN ativo
+- [x] `POST /users/:id/restore` (ADMIN)
+- [x] Nenhum filtro de tenant escrito à mão em lugar nenhum do módulo
+- [x] `passwordHash` nunca sai na resposta — mapeamento explícito, não `exclude` implícito
+- [x] O filtro `deletedAt: null` fica no service, **não** na extension
 
 ### Verificação
 
-- [ ] `npm run test:unit` + `npm run test:e2e` (`users.e2e-spec.ts`)
-- [ ] `test/integration/users-tenancy.int-spec.ts` — ADMIN do tenant A não enxerga nem altera
-      usuário do tenant B, com o filtro vindo só da extension
+- [x] `npm run test:unit` + `npm run test:e2e` (`users.e2e-spec.ts`)
+- [x] `test/integration/users-tenancy.int-spec.ts` — ADMIN do tenant A não enxerga nem altera
+      usuário do tenant B, com o filtro vindo só da extension; mesmo e-mail em tenants
+      diferentes é permitido; e o ciclo desativar → e-mail continua ocupado → restaurar
+
+### Não estava no plano
+
+- [x] **`Boolean('false')` é `true`.** O `enableImplicitConversion` do pipe global transformava
+      `?includeDeleted=false` em `true`, silenciosamente. E medido: um `@Transform` sozinho **não**
+      resolve — a conversão implícita roda antes e o transform recebe um booleano já errado, então
+      `'false'` e `'maybe'` chegavam os dois como `true`. `@Type(() => String)` na propriedade é o
+      que redireciona a conversão. `src/users/dto/query-users.dto.spec.ts` é a trava
+- [x] `VALIDATION_PIPE_OPTIONS` extraído de `src/app.setup.ts` — o spec acima precisa rodar pelo
+      **mesmo** pipe da aplicação, senão testa uma configuração que ninguém entrega
+- [x] `UpdateUserDto` escrito à mão em vez de `PartialType(CreateUserDto)`: herdaria `password`, e
+      trocar a senha de outra pessoa pela rota que a renomeia é como uma ação de admin
+      ampla demais vira tomada de conta
+- [x] `ParseUUIDPipe` em todo `:id` — sem ele um id malformado chega ao PostgreSQL, que recusa o
+      cast, e uma URL digitada errado vira 500 em vez de 400
+- [x] `count` e `findMany` num único `$transaction` — dois `await` deixariam uma escrita
+      concorrente cair no meio e o `total` deixaria de bater com a página
+- [x] Guarda do último ADMIN ativo também no `PATCH` (rebaixamento), não só no `DELETE`. Um tenant
+      sem ADMIN ativo não consegue criar usuário, restaurar nem mudar papel — não há volta
 
 ---
 

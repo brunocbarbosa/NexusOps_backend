@@ -47,8 +47,9 @@ import { RefreshTokenService } from './refresh-token.service';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  // Exported so the users module can hash a password without importing bcrypt
-  // in a second place.
-  exports: [HashingService],
+  // Exported for the users module: hashing a password in a second place would
+  // duplicate the cost configuration, and deactivating a user or changing a
+  // password has to end that user's sessions.
+  exports: [HashingService, RefreshTokenService],
 })
 export class AuthModule {}
