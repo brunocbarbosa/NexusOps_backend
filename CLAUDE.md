@@ -10,23 +10,29 @@ deliver CRUD features. `documents/MAIN.md` is the authoritative project specific
 Portuguese); read it before implementing anything architectural, since the "why" behind each
 technology choice is recorded there.
 
-`src/tenancy/` is real, measured code and the load-bearing part of the project. Everything else
-under `src/` is still the NestJS scaffold (`src/app.*`); infrastructure, tooling and the CI/CD
-pipeline are in place, and the domain modules are not written yet.
+`src/tenancy/` is real, measured code and the load-bearing part of the project. `src/auth/` and
+`src/users/` are the first vertical built on it, and `src/prisma/` plus `src/config/` are what
+connect the tenancy layer to Nest at all. `src/app.*` is still the scaffold, kept because the
+`docker` job in CI uses `GET /` as its liveness probe. Tickets, comments, the audit trail, the
+BullMQ queues and the WebSocket gateway are not written yet.
 
 Other documents, by purpose:
 
-| File                                | Read it when                                                        |
-| ----------------------------------- | ------------------------------------------------------------------- |
-| `documents/MAIN.md`                 | implementing anything architectural — the spec                      |
-| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending             |
-| `documents/study/GUIA_CI_CD.md`     | you need the CI/CD setup explained from first principles            |
-| `documents/important/`              | the two deep references below — kept together so they stay findable |
+| File                                         | Read it when                                                    |
+| -------------------------------------------- | --------------------------------------------------------------- |
+| `documents/MAIN.md`                          | implementing anything architectural — the spec                  |
+| `documents/CHECKLIST_TESTS_CICD.md`          | you want to know what is done and what is still pending         |
+| `documents/CHECKLIST_USERS_AUTH.md`          | same, for the users and auth slice                              |
+| `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
+| `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
+| `documents/important/`                       | the deep references below — kept together so they stay findable |
 
-`documents/important/` holds the two deep references that the sections below point at rather than
+`documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on
-— read it before editing `src/tenancy/`) and `RLS_NOTES.md` (Row-Level Security, which is **not
-implemented yet**). They live together so that detail nobody needs today does not get lost.
+— read it before editing `src/tenancy/`), `USERS.md` (everything auth and users rests on that was
+measured rather than read — read it before editing `src/auth/`, `src/users/`, or a DTO in any
+module) and `RLS_NOTES.md` (Row-Level Security, which is **not implemented yet**). They live
+together so that detail nobody needs today does not get lost.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
 > starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
@@ -52,6 +58,7 @@ npm run test:setup        # infra:test:up + migrate deploy against .env.test
 npm run lint              # eslint --fix over src, apps, libs, test
 npm run format            # prettier --write over the whole repo
 npm run format:check      # same, read-only (this is what CI runs)
+npm run typecheck         # tsc --noEmit over tsconfig.build.json and then the root tsconfig
 
 npm test                  # alias for test:unit
 npm run test:unit         # tier 1 — mocks only, no Docker (src/**/*.spec.ts)
@@ -60,6 +67,7 @@ npm run test:e2e          # tier 3 — Supertest against a booted app (test/e2e/
 npm run test:all          # the three in order
 npm run test:watch
 npm run test:cov          # coverage for the unit tier
+npm run test:cov:all      # all three tiers with coverage — what the Sonar gate sees
 
 npm run prisma:generate   # regenerate client into src/generated/prisma
 npm run prisma:migrate    # migrate dev (creates + applies a migration)
@@ -104,6 +112,12 @@ The tenancy regressions live in the integration tier: `test/integration/tenant-i
 is what holds the chokepoint design in place, and `test/integration/prisma-wiring.int-spec.ts` is
 the regression guard for the three Prisma 7 requirements below.
 
+**None of the three type-checks anything.** `isolatedModules` in `tsconfig.json` puts ts-jest in
+transpile-only mode, which was measured, not assumed: `const n: number = 'text'` in a spec passes
+the whole suite. `tsconfig.build.json` pins `rootDir: "./src"` and so cannot see `test/` either, so
+`npm run typecheck` runs both configs and CI runs both steps. Run it before believing a green
+suite.
+
 **The database is a separate, ephemeral one.** `docker-compose.test.yml` runs Postgres on 5433 and
 Redis on 6380, with the data directory on `tmpfs` — it starts empty and dies with the container.
 `.env.test` points at it and is **committed on purpose**: the credentials only ever reach that
@@ -126,7 +140,23 @@ guards that the `ValidationPipe` is still there.
 ## Environment
 
 `.env` holds local values and is gitignored; `.env.example` is the documented template — keep it in
-sync when adding a variable. `docker-compose.yml` reads `POSTGRES_*` / `REDIS_PORT` from the same
+sync when adding a variable, and add it to `EnvironmentVariables` in `src/config/env.validation.ts`
+too: the application validates its environment at boot and refuses to start with a missing or
+malformed one, listing every problem at once.
+
+`ConfigModule.forRoot` in `src/app.module.ts` is the only thing that loads `.env` for the running
+application — `nest start` does not read it, so before that existed the dev server had no
+`DATABASE_URL` at all. It does **not** overwrite a variable already present in `process.env`, which
+is the single reason the integration and e2e tiers stay on `.env.test`: their `setupFiles` load it
+before Nest boots, so it wins. That is a behaviour of a dependency rather than of this repository,
+so `test/integration/env-precedence.int-spec.ts` pins it.
+
+The image built by the Dockerfile sets only `NODE_ENV`, so anything that runs it — including the
+`docker` job's boot check in CI — has to supply the rest or the process exits on validation.
+
+What each variable does, which of the four separate readers sees it (`ConfigModule`, `dotenv` in
+the test tiers, `prisma.config.ts`, and `docker compose` — they are unrelated mechanisms), and the
+four places to touch when adding one, are in `documents/study/GUIA_VARIAVEIS_AMBIENTE.md`. `docker-compose.yml` reads `POSTGRES_*` / `REDIS_PORT` from the same
 `.env`, so the compose credentials and `DATABASE_URL` must agree or the app will point at a
 database that does not exist.
 
@@ -216,6 +246,25 @@ currently connects as one; and setting the tenant outside an interactive `$trans
 different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
 The measurements and the remaining work are in **`documents/important/RLS_NOTES.md`**.
 
+**Authentication, and the request-scoped tenant.** `src/auth/` is what turns the tenancy layer
+from measured code into code that runs on every request. `TenantContextInterceptor` (registered in
+`src/app.setup.ts`) opens the `AsyncLocalStorage` scope from `request.user`; it is an interceptor
+and not middleware because `request.user` does not exist until the guards have run. `JwtAuthGuard`
+is a global `APP_GUARD`, so a route is authenticated unless it says `@Public()` — only register,
+login, refresh and the liveness `GET /` do. `RolesGuard` is the second one, and `@Roles()` narrows
+a route further.
+
+`src/users/` is the first domain module, and it is the worked example of the two rules above: no
+query in it writes a tenant filter, and another tenant's id answers 404 rather than 403 — the
+extension makes it not-found, and a 403 would confirm the id exists somewhere.
+
+Everything that decision rests on and that was measured rather than read — why login carries
+`tenantDomain`, the three places that legitimately use `runWithoutTenant()`, the transaction that
+changes tenant scope halfway through, why refresh tokens need their own signing key, why bcrypt's
+72-byte truncation is a correctness constraint, and why `Boolean('false')` is `true` in a query
+string — is in **`documents/important/USERS.md`**. Read it before editing `src/auth/`,
+`src/users/`, or a DTO in any module.
+
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
 overwrite. Any new mutable aggregate needs the same guard.
@@ -263,8 +312,16 @@ vulnerability, and the alternative was downgrading Prisma. Re-check whether it i
 when upgrading Prisma.
 
 Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
-(`passport-jwt`) and `bcrypt` for password hashing. Validation uses `class-validator` /
-`class-transformer` through the global `ValidationPipe`, registered in `src/app.setup.ts`.
+(`passport-jwt`) and `bcrypt` for password hashing. Access and refresh tokens are signed with
+**different** keys — under one key a refresh token is accepted as a bearer token and the short
+access lifetime stops meaning anything, so `validateEnv` refuses a configuration where the two are
+equal.
+
+Validation uses `class-validator` / `class-transformer` through the global `ValidationPipe`, whose
+options live in the exported `VALIDATION_PIPE_OPTIONS` in `src/app.setup.ts` rather than inline —
+a DTO spec has to be able to run through the same pipe the application does, because
+`enableImplicitConversion` decides what a query string becomes and a spec with its own options
+would prove nothing about it.
 
 ## CI and branch flow
 
@@ -291,7 +348,7 @@ Squashing a _feature_ branch into `development` is fine and is the normal flow: 
 right after, so nothing survives to diverge. The rule is specifically about the two long-lived
 branches.
 
-The pipeline runs seven jobs. Three are worth knowing about before you touch them:
+The pipeline runs seven jobs. Four are worth knowing about before you touch them:
 
 - **`test`** runs `npm run test:setup` and then the three tiers, against the same
   `docker-compose.test.yml` you run locally. GitHub Actions' `services:` directive cannot override
@@ -300,20 +357,43 @@ The pipeline runs seven jobs. Three are worth knowing about before you touch the
 - **`docker`** builds the image on every PR and pushes to GHCR only on push to `main`. It boots the
   image and curls it before pushing — a build that emits nothing exits 0 and the `COPY` of an empty
   `dist/` succeeds, so only a boot catches that — and then runs `scripts/docker-smoke.js` against a
-  live database, which is what keeps the Dockerfile's aggressive prune honest.
+  live database, which is what keeps the Dockerfile's aggressive prune honest. The boot step feeds
+  the container the `.env.test` values, because the application validates its environment and would
+  otherwise exit before answering anything; `NODE_ENV` is deliberately not among them, so the image
+  keeps its own `production` and the step also exercises the placeholder-secret refusal.
+- **`quality`** runs ESLint read-only, Prettier, and `tsc` twice — once over `tsconfig.build.json`,
+  which is how production compiles, and once over the root config, which is the only thing that
+  type-checks `test/` at all (see "Three test tiers").
 - **`commitlint`** re-checks the commit messages that `git commit --no-verify` skipped locally.
   `commitlint.config.js` exempts commits carrying Dependabot's `Signed-off-by` trailer: its subject
   is sentence-case and not configurable, so without the exemption every bot PR is permanently red.
 
 `sonar` is live: SonarCloud analyses every PR against a quality gate on **new** code (80% coverage,
-3% duplication), fed by the coverage artifact the `test` job uploads. Two things keep it working and
+3% duplication), fed by the coverage artifact the `test` job uploads.
+
+**All three tiers report coverage, and Sonar reads all three lcov files.** Only the unit tier used
+to, which understated coverage by the design of the suite rather than by any absence of tests:
+controllers, guards, `JwtStrategy` and `RefreshTokenService` are deliberately exercised by the
+integration and e2e tiers, so they counted as uncovered. Measured on PR #26 — 54% from the unit
+tier alone, 97.7% across the three. This works only because `test/jest.base.js` pins `rootDir` at
+the repository root: the three reports name the same files the same way, so Sonar can union them
+instead of needing a merge step. Two things keep it working and
 both look like bugs when they break. It skips `dependabot[bot]`, because Dependabot pull requests
 get their secrets from a separate store and `SONAR_TOKEN` arrives empty — the job runs, since `vars`
 do arrive, and then fails with "Not authorized". And SonarCloud's **Automatic Analysis must stay
 off**: it refuses CI-based analysis while enabled, and it scans the whole repository, vendored
 Prisma docs included, where the job scopes itself to `src`.
 
-`documents/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
+**`sonar.tests` has to include `src`, not just `test/`.** The unit specs live next to the code they
+cover, so `sonar.sources=src` alone analysed them as production code — which cost twice, both
+measured on PR #26: the specs entered the coverage denominator without ever being covered (61.2%
+reported against 91.7% real), and their fixture passwords were raised as MAJOR "hard-coded
+password" vulnerabilities, dropping `new_security_rating` to 3 and failing the gate. The specs
+under `test/` never had either problem, because they were already in `sonar.tests`. Three
+properties do it together: `sonar.exclusions` takes the specs out of `sources` so nothing is
+indexed twice, and `sonar.test.inclusions` says what counts as a test inside `test,src`.
+
+`documents/study/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
 tool, why it is there, and what each pipeline job guards against. It is the long-form companion to
 this section.
 
