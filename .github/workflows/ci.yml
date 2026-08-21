@@ -121,11 +121,20 @@ jobs:
       - name: Prettier
         run: npm run format:check
 
-      # tsconfig.build.json, não o tsconfig raiz: é a configuração com que a
-      # imagem de produção é compilada. Os arquivos de `test/` são checados pelo
-      # ts-jest durante a própria suíte.
-      - name: TypeScript
+      # Os dois, e por motivos diferentes.
+      #
+      # `tsconfig.build.json` é a configuração com que a imagem de produção é
+      # compilada, e `rootDir: ./src` deixa `test/` inteiramente de fora dela.
+      #
+      # O tsconfig raiz cobre `test/`, que de outro modo não seria checado por
+      # ninguém: o `isolatedModules` do repositório põe o ts-jest em modo
+      # transpile-only, então um `const n: number = 'texto'` num spec passa na
+      # suíte inteira sem reclamação. Medido, não suposto.
+      - name: TypeScript (build)
         run: npx tsc --noEmit -p tsconfig.build.json
+
+      - name: TypeScript (repositório, inclui test/)
+        run: npx tsc --noEmit -p tsconfig.json
 
   # ---------------------------------------------------------------------------
   # Os três níveis contra o mesmo ambiente efêmero que roda localmente.

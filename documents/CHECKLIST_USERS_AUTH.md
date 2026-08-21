@@ -35,32 +35,48 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ### Configuração
 
-- [ ] `src/config/env.validation.ts` — validação com `class-validator` (já instalado; evita
+- [x] `src/config/env.validation.ts` — validação com `class-validator` (já instalado; evita
       adicionar `joi`/`zod`) de `NODE_ENV`, `PORT`, `DATABASE_URL`, `JWT_SECRET`,
       `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `BCRYPT_SALT_ROUNDS`
-- [ ] `ConfigModule.forRoot({ isGlobal: true, validate })` no `AppModule` — é o que faz
+- [x] `ConfigModule.forRoot({ isGlobal: true, validate })` no `AppModule` — é o que faz
       `npm run start:dev` enxergar o `.env` (hoje nada carrega, `nest start` não lê)
-- [ ] Confirmado que `.env.test` continua vencendo nas tiers de integração/e2e
+- [x] Confirmado que `.env.test` continua vencendo nas tiers de integração/e2e
 
 ### Prisma dentro do Nest
 
-- [ ] `src/prisma/prisma.client.ts` — `createPrismaClient()` com o adapter `PrismaPg` e
+- [x] `src/prisma/prisma.client.ts` — `createPrismaClient()` com o adapter `PrismaPg` e
       `$extends(tenantIsolationExtension)`, mais o tipo `ExtendedPrismaClient`
-- [ ] `src/prisma/prisma.module.ts` — provider sob o token `PRISMA`, exportado, com
+- [x] `src/prisma/prisma.module.ts` — provider sob o token `PRISMA`, exportado, com
       `onModuleDestroy` chamando `$disconnect()`
 
 ### Contexto de tenant por requisição
 
-- [ ] `src/tenancy/tenant-context.interceptor.ts` — roda o handler dentro de `runWithTenant`
+- [x] `src/tenancy/tenant-context.interceptor.ts` — roda o handler dentro de `runWithTenant`
       a partir de `request.user.tenantId`
-- [ ] Registrado em `configureApp()` (`src/app.setup.ts`), o chokepoint que o e2e compartilha
-- [ ] `src/app.setup.spec.ts` atualizado para provar que o interceptor continua registrado
+- [x] Registrado em `configureApp()` (`src/app.setup.ts`), o chokepoint que o e2e compartilha
+- [x] `src/app.setup.spec.ts` atualizado para provar que o interceptor continua registrado
 
 ### Verificação
 
-- [ ] `npm run test:unit` — spec do interceptor (ALS real, handler falso) e do `env.validation`
-- [ ] `npm run test:int` — spec novo provando que o client de `createPrismaClient()` filtra por
+- [x] `npm run test:unit` — spec do interceptor (ALS real, handler falso) e do `env.validation`
+- [x] `npm run test:int` — spec novo provando que o client de `createPrismaClient()` filtra por
       tenant dentro de `runWithTenant` e lança `TenantContextMissingError` fora dele
+- [x] `test/integration/env-precedence.int-spec.ts` — prova que `@nestjs/config` não sobrescreve
+      `process.env`. Não estava previsto: é comportamento de dependência, e é a única coisa que
+      mantém as suítes fora do banco de desenvolvimento agora que a app lê o `.env`
+
+### Não estava no plano
+
+- [x] `src/tenancy/tenant-scoped.ts` — o `create` gerado pelo Prisma exige `tenantId` em tempo de
+      compilação mesmo a extension injetando em runtime, então sem esta ponte todo service seria
+      obrigado a escrever o tenant à mão, que é justamente o que a camada existe para eliminar
+- [x] `setupFiles: ['reflect-metadata']` em `test/jest.base.js` — o polyfill só chegava
+      implicitamente pelo `@nestjs/core`, então um spec unitário que importa uma classe decorada
+      sem subir o Nest falhava com `Reflect.getMetadata is not a function`
+- [x] `npx tsc --noEmit -p tsconfig.json` no job `quality` e script `npm run typecheck`. Medido:
+      o `isolatedModules` põe o ts-jest em transpile-only, então `const n: number = 'texto'` num
+      spec passa na suíte inteira — `test/` não era checado por ninguém. O comentário do workflow
+      afirmava o contrário e foi corrigido
 
 ---
 

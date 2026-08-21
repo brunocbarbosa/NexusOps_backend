@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { TenantContextInterceptor } from './tenancy/tenant-context.interceptor';
 
 /**
  * Everything that turns a bare Nest application into *this* application.
@@ -27,6 +28,12 @@ export function configureApp(app: INestApplication): INestApplication {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+
+  // Establishes the AsyncLocalStorage tenant scope from the authenticated user,
+  // so no handler has to remember to do it. It needs no injected dependency, so
+  // it belongs here rather than as an APP_INTERCEPTOR provider; the guards that
+  // populate `request.user` do need the Reflector and live in AuthModule.
+  app.useGlobalInterceptors(new TenantContextInterceptor());
 
   return app;
 }
