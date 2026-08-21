@@ -325,7 +325,25 @@ jobs:
           # Qualquer uma das tags aponta para a mesma imagem; a primeira linha
           # basta e não depende da ordem de prioridade do metadata-action.
           IMAGE_REF="$(echo "$TAGS" | head -n1)"
-          docker run -d --rm --name nexusops-boot -p 3000:3000 "$IMAGE_REF"
+          # A aplicação valida o ambiente no boot e sai se faltar variável, então
+          # subir sem nenhuma testaria a validação e não o build. Mesma fonte de
+          # verdade do passo seguinte: o `.env.test` que a suíte já usa.
+          #
+          # NODE_ENV não é repassado de propósito — fica o `production` da
+          # imagem, o que faz este passo exercitar também a recusa do
+          # JWT_SECRET placeholder. O banco não precisa existir: o Prisma
+          # conecta na primeira query, e aqui nenhuma acontece.
+          set -a
+          . ./.env.test
+          set +a
+          docker run -d --rm --name nexusops-boot -p 3000:3000 \
+            -e PORT=3000 \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
+            -e JWT_REFRESH_EXPIRES_IN="$JWT_REFRESH_EXPIRES_IN" \
+            -e BCRYPT_SALT_ROUNDS="$BCRYPT_SALT_ROUNDS" \
+            "$IMAGE_REF"
           for i in $(seq 1 30); do
             if curl -fsS localhost:3000 > /dev/null; then
               echo "OK: a imagem respondeu em $i tentativa(s)."

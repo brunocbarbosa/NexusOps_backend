@@ -104,25 +104,45 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 3 — Auth: registro, login, guards
 
-- [ ] `src/auth/dto/` — `RegisterDto`, `LoginDto`, `RefreshDto`
-- [ ] `src/auth/hashing.service.ts` — `bcrypt` com custo vindo de `BCRYPT_SALT_ROUNDS`
-- [ ] `src/auth/jwt.strategy.ts` — payload `{ sub, tenantId, role, email }`; `validate()` recusa
+- [x] `src/auth/dto/` — `RegisterDto`, `LoginDto`, `RefreshDto`
+- [x] `src/auth/hashing.service.ts` — `bcrypt` com custo vindo de `BCRYPT_SALT_ROUNDS`
+- [x] `src/auth/jwt.strategy.ts` — payload `{ sub, tenantId, role, email }`; `validate()` recusa
       usuário soft-deleted (senão um token válido sobrevive à desativação até expirar)
-- [ ] `jwt-auth.guard.ts` + `@Public()` — `APP_GUARD` global, autenticado por padrão
-- [ ] `roles.guard.ts` + `@Roles()` sobre `UserRole` — segundo `APP_GUARD`
-- [ ] `@CurrentUser()`
-- [ ] `auth.service.register()` — `Tenant` + primeiro `ADMIN` numa `$transaction` que troca de
+- [x] `jwt-auth.guard.ts` + `@Public()` — `APP_GUARD` global, autenticado por padrão
+- [x] `roles.guard.ts` + `@Roles()` sobre `UserRole` — segundo `APP_GUARD`
+- [x] `@CurrentUser()`
+- [x] `auth.service.register()` — `Tenant` + primeiro `ADMIN` numa `$transaction` que troca de
       escopo no meio; `tenantDomain` duplicado → 409
-- [ ] `auth.service.login()` — tenant inexistente, senha errada e usuário desativado devolvem
+- [x] `auth.service.login()` — tenant inexistente, senha errada e usuário desativado devolvem
       **a mesma** 401
-- [ ] `auth.controller.ts` — `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
+- [x] `auth.controller.ts` — `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
 
 ### Verificação
 
-- [ ] `npm run test:unit` — service com Prisma mockado
-- [ ] `npm run test:e2e` — `auth.e2e-spec.ts`: registro → login → `/auth/me`, 401 sem token,
+- [x] `npm run test:unit` — service com Prisma mockado
+- [x] `npm run test:e2e` — `auth.e2e-spec.ts`: registro → login → `/auth/me`, 401 sem token,
       401 com senha errada
-- [ ] `npm run test:int` — o `$transaction` do `register()` com troca de escopo
+- [x] `npm run test:int` — o `$transaction` do `register()` com troca de escopo, mais o rollback
+      do tenant quando a escrita escopada falha e a recusa de escrita cross-tenant **dentro** da
+      transação
+
+### Não estava no plano
+
+- [x] `src/auth/password.constraints.ts` — `@MaxBytes(72)`. Medido contra o bcrypt 6.0.0: ele
+      trunca em 72 **bytes** e **não lança**, então duas senhas com os mesmos 72 primeiros bytes
+      autenticam uma pela outra. Bytes e não caracteres — um emoji custa quatro
+- [x] `HashingService.compareWithDecoy()` — sem isso, "tenant inexistente" responde em 1ms e
+      "senha errada" em 50ms, e o endpoint de login vira um oráculo de enumeração de contas por
+      cronômetro, por mais igual que a mensagem seja
+- [x] `@Public()` no `GET /` do scaffold — o job `docker` da CI prova que a imagem sobe com
+      `curl -fsS localhost:3000`, e o `-f` trata 401 como falha. Verificado contra a imagem real
+- [x] Boot check da CI passa as variáveis do `.env.test`. A app agora valida o ambiente no boot,
+      e a imagem só define `NODE_ENV` — subir sem variável nenhuma matava o processo com
+      `Invalid environment (11 problem(s))`. Medido rodando a imagem, não deduzido. `NODE_ENV`
+      não é repassado de propósito: fica o `production` da imagem, o que faz o passo exercitar
+      também a recusa do `JWT_SECRET` placeholder
+- [x] `test/utils/response-body.ts` — o supertest tipa `response.body` como `any`, o que desliga
+      as regras de lint type-checked em cima dele
 
 ---
 
