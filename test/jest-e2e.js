@@ -17,7 +17,7 @@ const base = require('./jest.base');
 module.exports = {
   ...base,
   testMatch: ['<rootDir>/test/e2e/**/*.e2e-spec.ts'],
-  setupFiles: ['dotenv/config'],
+  setupFiles: [...base.setupFiles, 'dotenv/config'],
   maxWorkers: 1,
   testTimeout: 30000,
   coverageDirectory: '<rootDir>/coverage-e2e',

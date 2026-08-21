@@ -17,7 +17,10 @@ describe('AppController (e2e)', () => {
     await app.close();
   });
 
-  it('GET / returns the scaffold greeting', () => {
+  // Reachable without a token, which the `docker` job in CI depends on: it
+  // boots the image and runs `curl -fsS localhost:3000`, and `-f` treats a 401
+  // as a failure. Every other route is authenticated by default.
+  it('GET / returns the scaffold greeting without authentication', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)

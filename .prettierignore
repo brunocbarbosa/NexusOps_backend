@@ -10,6 +10,8 @@
 src/generated/
 dist/
 coverage/
+coverage-integration/
+coverage-e2e/
 package-lock.json
 
 # Prisma owns the formatting of these (`prisma format`), and its style does not
