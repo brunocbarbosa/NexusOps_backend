@@ -10,8 +10,28 @@ deliver CRUD features. `documents/MAIN.md` is the authoritative project specific
 Portuguese); read it before implementing anything architectural, since the "why" behind each
 technology choice is recorded there.
 
-The application code is still a bare NestJS scaffold (`src/app.*`). Infrastructure, dependencies,
-and tooling are in place; the domain modules are not written yet.
+`src/tenancy/` is real, measured code and the load-bearing part of the project. Everything else
+under `src/` is still the NestJS scaffold (`src/app.*`); infrastructure, tooling and the CI/CD
+pipeline are in place, and the domain modules are not written yet.
+
+Other documents, by purpose:
+
+| File                                | Read it when                                                        |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| `documents/MAIN.md`                 | implementing anything architectural — the spec                      |
+| `documents/CHECKLIST_TESTS_CICD.md` | you want to know what is done and what is still pending             |
+| `documents/study/GUIA_CI_CD.md`     | you need the CI/CD setup explained from first principles            |
+| `documents/important/`              | the two deep references below — kept together so they stay findable |
+
+`documents/important/` holds the two deep references that the sections below point at rather than
+inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on
+— read it before editing `src/tenancy/`) and `RLS_NOTES.md` (Row-Level Security, which is **not
+implemented yet**). They live together so that detail nobody needs today does not get lost.
+
+> **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
+> starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
+> The `pre-commit` hook also rewrites staged files (`eslint --fix` via lint-staged), so a commit
+> can legitimately contain more than you staged.
 
 ## Commands
 
@@ -95,6 +115,14 @@ database — they truncate and reseed, so pointing them at `.env` wipes local da
 `npm run test:unit` needs nothing running. The other two need `npm run test:setup` first (or
 `infra:test:up` plus `prisma migrate deploy`), and CI runs exactly those same scripts.
 
+**`src/app.setup.ts` is the second chokepoint in this repository**, and it exists for the same
+reason as the tenancy one. `configureApp(app)` holds everything that turns a bare Nest application
+into _this_ application — today the global `ValidationPipe`, tomorrow filters, interceptors, a
+route prefix. `src/main.ts` calls it and so does `test/utils/create-test-app.ts`. Register a pipe
+or filter directly in `main.ts` and every e2e assertion about it becomes a lie: the test would be
+exercising a differently-configured application than the one that ships. `src/app.setup.spec.ts`
+guards that the `ValidationPipe` is still there.
+
 ## Environment
 
 `.env` holds local values and is gitignored; `.env.example` is the documented template — keep it in
@@ -105,8 +133,10 @@ database that does not exist.
 Prisma 7 does **not** read `.env` on its own: `prisma.config.ts` imports `dotenv/config`, and that
 is the only reason the CLI sees `DATABASE_URL`. The datasource block in `prisma/schema.prisma`
 therefore has no `url` — the URL is supplied by `prisma.config.ts`. Don't "fix" the schema by
-adding `env("DATABASE_URL")` back to it. Jest picks up `.env` only in the e2e config, via
-`setupFiles: ["dotenv/config"]`.
+adding `env("DATABASE_URL")` back to it. Jest never reads `.env`. The unit tier has no `setupFiles` at all; the
+integration and e2e tiers load `dotenv/config`, and their npm scripts point `DOTENV_CONFIG_PATH`
+at `.env.test`. Adding `setupFiles: ["dotenv/config"]` to the unit tier would silently give it a
+database connection it is not supposed to have.
 
 ## Prisma 7 wiring
 
@@ -165,76 +195,26 @@ The critical consequence: **BullMQ workers and WebSocket handlers have no HTTP r
 payload and re-established inside the worker before any query runs. This is the single most
 likely place for a tenant leak.
 
-`src/tenancy/` implements both layers' first half. Measured against Prisma 7.9.1, and the design
-depends on all five:
+`src/tenancy/` implements the first of those two layers. Two rules follow from it, and they hold
+everywhere in the codebase:
 
-- **`findUnique` accepts a non-unique extra field in `where`.** `{ where: { id, tenantId } }` is
-  valid and filters correctly, so the extension injects `where.tenantId` uniformly and never
-  rewrites `findUnique` into `findFirst`. Cross-tenant `update`/`delete` surface as `P2025` with the
-  other tenant's row untouched — which makes the API answer 404, not 403, so it does not confirm
-  that another tenant's resource exists.
-- **`PrismaPromise` is lazy, and that will eat your context.** The query is dispatched when the
-  promise is awaited, not when the method is called. So `als.run(store, () => prisma.x.findMany())`
-  dispatches _outside_ the scope. `runWithTenant` is therefore `async` and awaits `fn()` inside
-  `storage.run`; do not "simplify" it back to a synchronous wrapper. Symptom when this regresses:
-  `TenantContextMissingError` from code that visibly established a tenant.
-- **Query extensions never fire for nested access.** `include: {}` intercepts only the parent
-  operation, and so does a nested `create`. The extension cannot filter a nested read or fix a
-  nested child's `tenantId`.
-- **That hole is closed in the schema, not in the extension.** Child relations use composite foreign
-  keys against `@@unique([tenantId, id])`. Prisma then regenerates the nested create input _without_
-  a `tenantId` field, so the wrong tenant stops being expressible, and a cross-tenant child cannot
-  exist for a nested read to return. Cost: the two optional relations lose `ON DELETE SET NULL` and
-  become `RESTRICT`, because part of a composite key cannot be nulled while `tenant_id` is
-  `NOT NULL`. Deleting a user therefore requires anonymising `audit_logs.user_id` first.
-- **Scoping every model by default fails closed in both directions.** The extension filters every
-  model except an explicit `TENANT_AGNOSTIC` allowlist. Passing `tenantId` to a model that lacks the
-  column raises `PrismaClientValidationError`, so forgetting to exempt an agnostic model breaks
-  loudly, while forgetting to register a new scoped model leaves it already protected. Unknown
-  operations throw rather than run unfiltered, so a Prisma upgrade that adds one cannot leak.
+- **Never hand-write a tenant filter in a service.** The extension injects it; a hand-written one
+  is a filter that can be wrong or forgotten.
+- **Never reach for a `currentTenantId(): string | undefined`.** It does not exist on purpose,
+  because `?? fallback` is exactly the silent bypass this design prevents. Use `requireTenantId()`,
+  which returns a string or throws, and `runWithoutTenant()` when a read genuinely must be unscoped.
 
-Two things the extension deliberately refuses to make convenient. There is no
-`currentTenantId(): string | undefined`, because `?? fallback` is the silent bypass the design
-exists to prevent — `requireTenantId()` returns a string or throws, and `currentScope()` returns a
-union whose cases must all be handled. And reading `Tenant` unscoped, which the login path needs
-before any tenant identity exists, requires an explicit `runWithoutTenant()`; a merely absent
-context is refused, so a lost context cannot quietly widen into a read of every tenant.
+The extension's measured behaviour against Prisma 7.9.1 — five findings the design depends on,
+including why nested access cannot be intercepted and why that hole is closed in the schema instead
+— is in **`documents/important/TENANCY_EXTENSION.md`**. Read it before editing anything in
+`src/tenancy/`, and re-check it after a Prisma upgrade.
 
-`$queryRaw` / `$executeRaw` are client operations, not model ones, and never reach the extension.
-That, plus a defect in the extension itself, is the entire remaining job for RLS — considerably
-smaller than it looked before these measurements.
-
-RLS will be inert in this project until the application stops connecting as `nexusops`. Two
-mechanisms, and the second is the one that bites — both measured against this repo's own container,
-not taken from documentation:
-
-- The **table owner** bypasses RLS. `ALTER TABLE ... FORCE ROW LEVEL SECURITY` fixes that case.
-- A **superuser** bypasses RLS unconditionally, and `FORCE` does _not_ help. `docker-compose.yml`
-  sets `POSTGRES_USER=nexusops`, and `initdb` makes that role a superuser: `pg_roles` reports
-  `rolsuper = t, rolbypassrls = t`. So with the default `DATABASE_URL`, every policy is dead
-  weight while `pg_policies` still shows the setup as correct — a silent failure that looks like
-  protection.
-
-The fix is a dedicated low-privilege role holding DML only, not owning the tables and not a
-superuser; migrations keep using the owning role. `.env.example` reserves `DATABASE_URL_APP` for it.
-Verified: as `nexusops` a tenant-scoped query returned every tenant's rows even with `FORCE` on; as
-a `NOSUPERUSER NOBYPASSRLS` non-owner it returned only the scoped rows, and zero rows with no tenant set.
-
-**Setting the tenant for RLS must be transaction-scoped, and `SET` cannot do it.** Two traps:
-
-1. `prisma.$executeRaw` always parameterizes interpolated values, and PostgreSQL's `SET` accepts no
-   bind parameters — `` $executeRaw`SET app.tenant_id = ${tenantId}` `` fails every call with
-   `42601: syntax error at or near "$1"`. Use `set_config` instead.
-2. `@prisma/adapter-pg` sends any query outside `$transaction()` straight to the `pg.Pool`, one
-   checkout per call, so a standalone `set_config` and the following query can land on different
-   physical connections — and a session-scoped value lingers on whichever connection last set it.
-   Under concurrency that yields _another single tenant's_ rows, intermittently. Measured on a pool
-   of 4 with 60 concurrent requests: 46 of 60 observed the wrong tenant. Pinning one connection per
-   request and using transaction-local scope brought it to 0 of 60.
-
-So the tenant must be set with `set_config('app.tenant_id', $1, true)` — the third argument is
-`is_local` — inside an **interactive** `$transaction(async (tx) => ...)`, which pins one connection
-and resets the value at commit. The array form of `$transaction` does not give that guarantee.
+**RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
+the code today. Two things will bite whoever writes it, both measured here rather than read in
+documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
+currently connects as one; and setting the tenant outside an interactive `$transaction` lands on a
+different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
+The measurements and the remaining work are in **`documents/important/RLS_NOTES.md`**.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
@@ -259,6 +239,24 @@ NestJS 11 on Node 24, TypeScript in `strict` mode with `module`/`moduleResolutio
 `npm run prisma:generate` after cloning or after any schema change, or imports will fail to
 resolve.
 
+**Two lines of `tsconfig.build.json` are load-bearing and look like clutter.** `rootDir: "./src"`
+keeps `prisma.config.ts` out of the program — without it tsc infers a rootDir of `.`, the build
+lands in `dist/src/main.js`, and `start:prod` plus the Dockerfile `CMD` both point at a file that
+is not there. Setting it moves the incremental cache to the repository root, outside anything
+`nest build` cleans, so `tsBuildInfoFile` pins it back inside `dist/`. Without that pin,
+`deleteOutDir` wipes `dist/` while the cache survives insisting the build is current: **a clean
+build emits zero files and exits 0**, and `COPY` of an empty `dist/` raises no error either. That
+is why CI boots the image and curls it — the smoke test runs `scripts/docker-smoke.js`, not
+`dist/main`, and would not catch it.
+
+**The Dockerfile deletes packages on purpose** (778MB → 406MB): the Prisma CLI and Studio, which
+survive `--omit=dev` because `@prisma/client@7` declares them as _optional_ peers, plus every WASM
+query compiler that is not PostgreSQL. All of it loads lazily, so a wrong prune fails on the first
+real query rather than at boot. `scripts/docker-smoke.js` runs inside the image against a live
+database and issues both a `$queryRaw` and a model query — the model query is the one that reaches
+the compiler. Re-check the prune when upgrading Prisma; the smoke test is what turns that from a
+hope into a check.
+
 `package.json` pins an npm `overrides` entry forcing `deepmerge-ts` to `^8.0.1`. This resolves a
 high-severity advisory reachable through the Prisma CLI; removing it reintroduces the
 vulnerability, and the alternative was downgrading Prisma. Re-check whether it is still needed
@@ -266,7 +264,7 @@ when upgrading Prisma.
 
 Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
 (`passport-jwt`) and `bcrypt` for password hashing. Validation uses `class-validator` /
-`class-transformer`, which need a global `ValidationPipe` — not yet registered in `src/main.ts`.
+`class-transformer` through the global `ValidationPipe`, registered in `src/app.setup.ts`.
 
 ## CI and branch flow
 
@@ -293,7 +291,17 @@ The pipeline runs seven jobs. Three are worth knowing about before you touch the
   `commitlint.config.js` exempts commits carrying Dependabot's `Signed-off-by` trailer: its subject
   is sentence-case and not configurable, so without the exemption every bot PR is permanently red.
 
-`sonar` is written and inert until the repository variable `SONAR_ENABLED` is set to `true`.
+`sonar` is live: SonarCloud analyses every PR against a quality gate on **new** code (80% coverage,
+3% duplication), fed by the coverage artifact the `test` job uploads. Two things keep it working and
+both look like bugs when they break. It skips `dependabot[bot]`, because Dependabot pull requests
+get their secrets from a separate store and `SONAR_TOKEN` arrives empty — the job runs, since `vars`
+do arrive, and then fails with "Not authorized". And SonarCloud's **Automatic Analysis must stay
+off**: it refuses CI-based analysis while enabled, and it scans the whole repository, vendored
+Prisma docs included, where the job scopes itself to `src`.
+
+`documents/GUIA_CI_CD.md` explains the whole setup from first principles, in Portuguese — every
+tool, why it is there, and what each pipeline job guards against. It is the long-form companion to
+this section.
 
 ## Repo conventions
 
