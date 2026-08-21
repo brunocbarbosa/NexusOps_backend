@@ -1,10 +1,15 @@
 # Checklist — Infraestrutura de Testes e CI/CD
 
-Acompanhamento item a item da implementação. O plano completo — com o porquê de cada decisão,
-a tabela de correções ao `ROTEIRO_TESTS.md` e as notas de **Como saiu** de cada fase concluída —
-está em [`PLANO_TESTS_CICD.md`](./PLANO_TESTS_CICD.md).
+Acompanhamento item a item da implementação, mantido durante toda a execução. É o registro do que
+foi feito e do que continua pendente.
+
+> O plano de execução (`PLANO_TESTS_CICD.md`) e o roteiro original (`ROTEIRO_TESTS.md`) foram
+> removidos do repositório depois que todas as fases fecharam: eram documentos de processo, e o
+> resultado deles está aqui e no guia. As notas de **Como saiu** que viviam no plano continuam
+> recuperáveis pelo histórico do git.
+
 A explicação didática de tudo que foi montado — cada ferramenta, o pipeline, as configurações do
-GitHub — está em [`GUIA_CI_CD.md`](./GUIA_CI_CD.md).
+GitHub — está em [`study/GUIA_CI_CD.md`](./study/GUIA_CI_CD.md).
 
 Marcar cada item ao concluir. Cada fase termina com verificação + commit + checkpoint.
 
@@ -164,7 +169,7 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
       e os arquivos que o `prisma format` governa. Sem isso o `prettier --check` reprovava em
       66 arquivos que não são deste projeto
 - [x] `prettier --write` nos 6 arquivos do projeto que reprovavam (`CLAUDE.md`, `README.md`,
-      `documents/MAIN.md`, `documents/DATABASE_MODEL.md`, `prisma.config.ts`,
+      `documents/MAIN.md`, `prisma.config.ts`,
       `eslint.config.mjs` e o spec em `docs/`)
 - [x] Scripts `format` (`prettier --write .`) e `format:check` (`prettier --check .`) — o
       `format` antigo cobria só `src/` e `test/`, então nunca teria detectado o que a CI detecta
@@ -215,7 +220,7 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 ## Fase 6 — Documentação
 
 - [x] `documents/ROTEIRO_TESTS.md` — cabeçalho apontando para este checklist e para a tabela
-      de correções (corpo original preservado como registro da visão)
+      de correções (o arquivo foi removido depois, junto com o plano, ao fim da execução)
 - [x] `CLAUDE.md` — caminho `test/prisma.e2e-spec.ts` (citado 2× como guarda de regressão do
       Prisma 7) atualizado para `test/integration/prisma-wiring.int-spec.ts`
 - [x] `CLAUDE.md` — seção de comandos com os novos scripts (`test:unit` / `test:int` /
