@@ -798,6 +798,8 @@ Um **ruleset** é o conjunto de regras que o GitHub aplica a uma branch. Existem
 
 - exige Pull Request (com 0 aprovações — o projeto tem um desenvolvedor só)
 - exige `quality`, `test` e `guard-main-source` verdes
+- **só permite merge commit** — squash e rebase ficam indisponíveis nesta branch (o porquê está
+  em "Merge commit ou squash?", logo abaixo)
 - bloqueia force-push e deleção
 - **sem bypass** — nem administrador escapa
 
@@ -829,10 +831,101 @@ branch de feature e entra por PR.
 | branch de feature → `development` | **squash** | a branch é descartável; vira um commit limpo              |
 | `development` → `main`            | **merge**  | as duas são permanentes e precisam continuar relacionadas |
 
-O segundo caso não é gosto pessoal. Um merge commit faz o histórico da `development` virar
-ancestral da `main`, e a base de comparação entre as duas avança. Com squash, a `main` ganha um
-commit que **não** tem a `development` como ancestral: a base de comparação fica parada, e o
-próximo PR entre elas reapresenta todos os commits antigos como se fossem novos.
+O segundo caso não é gosto pessoal, e o custo de errar é alto o bastante para merecer a explicação
+inteira.
+
+#### Os três métodos, e o que cada um faz com o histórico
+
+Quando se clica em "Merge pull request", o GitHub pode montar o resultado de três maneiras. As três
+produzem **exatamente o mesmo conteúdo de arquivos** e histórias completamente diferentes.
+
+**Merge commit** cria um commit com **dois pais**: a `main` de antes e a `development`. É esse
+segundo pai que registra que uma veio da outra.
+
+```
+main:        A───────────M
+                        ╱
+development: A──B──C──D─┘     M tem dois pais → a main passa a ter a development como ancestral
+```
+
+**Squash** pega B, C e D, esmaga tudo num commit **novo** S com **um pai só**, e coloca em cima da
+`main`. O conteúdo de S é idêntico ao de D, mas o sha é outro e não existe ligação alguma com a
+`development`.
+
+```
+main:        A───────────S     S tem um pai só e nenhum vínculo com B, C ou D
+                               (o conteúdo é o mesmo de D; o sha, não)
+development: A──B──C──D
+```
+
+**Rebase** reescreve B, C e D como commits novos em cima da `main`. Rompe o vínculo pelo mesmo
+motivo: shas diferentes.
+
+#### Por que o squash quebra a relação entre `development` e `main`
+
+Repare no segundo desenho: depois do squash, as duas branches compartilham só o ponto A. O git não
+tem como saber que S e D são a mesma coisa — para ele são dois trabalhos independentes que partiram
+do mesmo lugar.
+
+No release seguinte, ao abrir `development` → `main`, o git faz a conta dele: _"de A até S a `main`
+alterou o `CLAUDE.md`; de A até D a `development` alterou o `CLAUDE.md` **também**; os dois lados
+mexeram no mesmo arquivo → conflito, e alguém humano precisa decidir"_.
+
+O ponto essencial é que **não existe conflito de verdade**. É contabilidade: o git está comparando
+a partir de um ancestral comum velho demais, porque o squash apagou o ancestral correto.
+
+Isso só acontece porque a `development` **continua viva** depois do merge. Uma branch de feature é
+deletada logo em seguida, então não sobra nada para divergir — e é por isso que a
+`development-protected` continua permitindo squash, o que é desejável: uma branch de feature virar
+um commit único é mais limpo do que arrastar commits de trabalho em progresso para o histórico.
+
+#### O caso real, para não parecer teoria
+
+Aconteceu neste repositório. O PR #8 (`development` → `main`) foi mesclado com squash. O release
+seguinte, o PR #21, abriu como `CONFLICTING` em quatro arquivos — no mesmo dia, o que mostra que o
+estrago não precisa de tempo para aparecer, só do próximo release:
+`CLAUDE.md`, `README.md`, `documents/CHECKLIST_TESTS_CICD.md` e um arquivo que a `development` havia
+deletado de propósito.
+
+A prova de que era falso conflito coube num comando. `git diff origin/main b857a71` saiu **vazio**:
+a árvore da `main` era byte a byte idêntica à da `development` no commit que o PR #8 havia
+empacotado. A `main` não tinha uma linha sequer que a `development` já não tivesse.
+
+Desatolar custou um PR extra (#22) com um **merge de reconciliação**:
+
+```bash
+git checkout -b chore/reconcile-main-into-development
+git merge origin/main -s ours    # registra a main como mesclada, mantém a árvore da development
+git diff origin/development HEAD # verificação obrigatória: precisa sair VAZIO
+```
+
+A estratégia `-s ours` registra a `main` como um segundo pai — recriando a ancestralidade — sem
+trazer conteúdo nenhum dela. Só é segura porque a verificação acima prova que não há o que trazer;
+usada sem essa prova, ela **descarta silenciosamente** o que existir do outro lado.
+
+Há ainda uma armadilha secundária, e essa engana com facilidade: **um PR conflitado não produz
+execução de CI de `pull_request`**. O GitHub roda esse gatilho contra o merge hipotético
+(`refs/pull/N/merge`), e com conflito ele não consegue calculá-lo — então a execução nem chega a ser
+criada. Os status checks que aparecem no PR são os do evento `push` na branch de origem. Ficam
+todos verdes, parecem ser do PR, e não são.
+
+#### Como a regra deixou de depender de disciplina
+
+Enquanto isto fosse só uma convenção escrita, bastava um clique no menu errado às onze da noite. Por
+isso o `main-protected` passou a declarar quais métodos aceita:
+
+```jsonc
+// regra pull_request do ruleset main-protected
+"allowed_merge_methods": ["merge"], // antes: ["merge", "squash"]
+```
+
+Na prática, o botão verde de um PR para a `main` passa a oferecer **só** "Create a merge commit" — o
+menu com "Squash and merge" desaparece daquela tela, e continua normal nos PRs para a
+`development`, porque a restrição é por branch, e não do repositório inteiro.
+
+É o mesmo princípio que governa o `src/tenancy/` e o `src/app.setup.ts`: uma garantia que depende de
+alguém lembrar é uma garantia que uma hora falha. Melhor tornar o erro inalcançável do que
+documentá-lo e torcer.
 
 ---
 
@@ -995,6 +1088,28 @@ Não é bug: feche esse PR, leve a mudança para a `development` primeiro, e abr
 
 Correto, é o desenho. Crie uma branch e abra um PR.
 
+### O PR `development` → `main` abre com conflito
+
+Quase certamente **não** é conflito de verdade: é a marca de um merge anterior feito com squash.
+Confirme comparando a `main` com o commit que o release anterior empacotou — se a saída for vazia, a
+`main` não tem nada que a `development` já não tenha:
+
+```bash
+gh pr view <numero-do-PR-anterior> --json headRefOid -q .headRefOid   # o sha empacotado
+git diff origin/main <esse-sha>                                        # precisa sair VAZIO
+```
+
+Sendo esse o caso, a correção é o merge de reconciliação descrito em
+"[Merge commit ou squash?](#merge-commit-ou-squash)" — um PR para a `development` com
+`git merge origin/main -s ours`. Depois dele o PR de release destrava sozinho.
+
+E desconfie dos status checks verdes nesse PR: com conflito, a CI de `pull_request` **não roda**, e
+o que aparece é a execução do evento `push`. Confirme o estado real com:
+
+```bash
+gh pr view <numero> --json mergeable,mergeStateStatus
+```
+
 ---
 
 ## 11. Glossário
@@ -1032,7 +1147,14 @@ automaticamente o que passou).
 
 **Lockfile** — `package-lock.json`. Trava as versões exatas de tudo que foi instalado.
 
+**Ancestral** — commit que está no histórico de outro. Se a `main` é ancestral da `development`,
+o git sabe que uma veio da outra e não trata as duas como trabalhos independentes. É o que o squash
+entre branches permanentes destrói.
+
 **Merge base** — o commit ancestral comum entre duas branches, usado para calcular o que é "novo".
+
+**Merge commit** — commit com dois pais, criado ao mesclar duas branches. É o que preserva a
+ancestralidade entre elas.
 
 **Multi-stage build** — Dockerfile com estágios; o de construção é descartado e só o resultado é
 copiado para o final.
