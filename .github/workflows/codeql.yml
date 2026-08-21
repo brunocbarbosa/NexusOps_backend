@@ -34,9 +34,9 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           # Uma única linguagem: o repositório é TypeScript de ponta a ponta.
           # `javascript-typescript` cobre as duas — não existe um `typescript`
@@ -47,6 +47,6 @@ jobs:
       # Sem passo de build: o CodeQL analisa JavaScript/TypeScript direto do
       # código-fonte. Compilar seria trabalho jogado fora, e `src/generated/`
       # (gitignored) nem chega ao checkout.
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: '/language:javascript-typescript'
