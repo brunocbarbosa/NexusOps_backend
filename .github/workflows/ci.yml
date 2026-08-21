@@ -165,14 +165,20 @@ jobs:
       - name: Subir o banco efêmero e aplicar as migrations
         run: npm run test:setup
 
+      # Os três com `--coverage`. Só o unitário produzia relatório, e isso
+      # subestimava a cobertura pelo desenho da suíte, não pela falta de teste:
+      # controllers, guards, JwtStrategy e RefreshTokenService são exercitados
+      # pelos níveis de integração e e2e por escolha, então ficavam contados
+      # como não cobertos. Medido no PR #26: 54% só com o unitário, 97,7%
+      # somando os três.
       - name: Testes unitários
         run: npm run test:unit -- --coverage
 
       - name: Testes de integração
-        run: npm run test:int
+        run: npm run test:int -- --coverage
 
       - name: Testes e2e
-        run: npm run test:e2e
+        run: npm run test:e2e -- --coverage
 
       - name: Publicar a cobertura
         # `always()` para que a cobertura de uma execução que falhou continue
@@ -181,7 +187,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage
-          path: coverage/
+          path: |
+            coverage/
+            coverage-integration/
+            coverage-e2e/
           retention-days: 7
           # `warn`, não `error`: com `always()` este passo também roda quando o
           # job falhou antes de qualquer teste rodar, e aí a ausência de
@@ -239,11 +248,12 @@ jobs:
           # calcular o "new code" de um PR.
           fetch-depth: 0
 
+      # Na raiz: o artefato traz os três diretórios de cobertura, um por nível.
       - name: Baixar a cobertura do job de teste
         uses: actions/download-artifact@v8
         with:
           name: coverage
-          path: coverage/
+          path: .
 
       # v6 e não v5: a v5 carrega uma vulnerabilidade high de argument injection
       # (GHSA, corrigida na 6.0.0), e a própria ação imprime esse aviso a cada
@@ -260,7 +270,7 @@ jobs:
             -Dsonar.sources=src
             -Dsonar.tests=test
             -Dsonar.exclusions=src/generated/**
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info,coverage-integration/lcov.info,coverage-e2e/lcov.info
 
   # ---------------------------------------------------------------------------
   # Build em todo PR (o Dockerfile é código e quebra como código); push só em

@@ -65,6 +65,7 @@ npm run test:e2e          # tier 3 — Supertest against a booted app (test/e2e/
 npm run test:all          # the three in order
 npm run test:watch
 npm run test:cov          # coverage for the unit tier
+npm run test:cov:all      # all three tiers with coverage — what the Sonar gate sees
 
 npm run prisma:generate   # regenerate client into src/generated/prisma
 npm run prisma:migrate    # migrate dev (creates + applies a migration)
@@ -362,7 +363,15 @@ The pipeline runs seven jobs. Four are worth knowing about before you touch them
   is sentence-case and not configurable, so without the exemption every bot PR is permanently red.
 
 `sonar` is live: SonarCloud analyses every PR against a quality gate on **new** code (80% coverage,
-3% duplication), fed by the coverage artifact the `test` job uploads. Two things keep it working and
+3% duplication), fed by the coverage artifact the `test` job uploads.
+
+**All three tiers report coverage, and Sonar reads all three lcov files.** Only the unit tier used
+to, which understated coverage by the design of the suite rather than by any absence of tests:
+controllers, guards, `JwtStrategy` and `RefreshTokenService` are deliberately exercised by the
+integration and e2e tiers, so they counted as uncovered. Measured on PR #26 — 54% from the unit
+tier alone, 97.7% across the three. This works only because `test/jest.base.js` pins `rootDir` at
+the repository root: the three reports name the same files the same way, so Sonar can union them
+instead of needing a merge step. Two things keep it working and
 both look like bugs when they break. It skips `dependabot[bot]`, because Dependabot pull requests
 get their secrets from a separate store and `SONAR_TOKEN` arrives empty — the job runs, since `vars`
 do arrive, and then fails with "Not authorized". And SonarCloud's **Automatic Analysis must stay

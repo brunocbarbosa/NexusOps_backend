@@ -18,6 +18,7 @@
     "test": "npm run test:unit",
     "test:watch": "jest --config ./test/jest-unit.js --watch",
     "test:cov": "jest --config ./test/jest-unit.js --coverage",
+    "test:cov:all": "npm run test:unit -- --coverage && npm run test:int -- --coverage && npm run test:e2e -- --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config ./test/jest-unit.js --runInBand",
     "test:e2e": "DOTENV_CONFIG_PATH=.env.test node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.js",
     "infra:up": "docker compose up -d",

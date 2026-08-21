@@ -283,7 +283,11 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 - [ ] Papel de baixo privilégio para RLS (`DATABASE_URL_APP`) provisionado no
       `docker-compose.test.yml`, com testes que provem que as policies barram cross-tenant.
       Depende de a camada RLS existir (ver `CLAUDE.md` → Architecture)
-- [ ] Merge dos relatórios de cobertura dos três níveis num único `lcov` para o Sonar
+- [x] Merge dos relatórios de cobertura dos três níveis para o Sonar. Feito sem ferramenta de
+      merge: os três `lcov` nomeiam os mesmos arquivos do mesmo jeito, porque o `rootDir` está
+      fixado na raiz do repositório, então basta apontar
+      `sonar.javascript.lcov.reportPaths` para os três e o Sonar une. Virou necessário no PR #26,
+      onde o gate reprovou com 54% — a cobertura real, somando os níveis, era 97,7%
 - [ ] Job de deploy consumindo a imagem do GHCR
 - [x] _Secret scanning_ e _push protection_ ligados. A auditoria da Fase 0 foi uma foto de cinco
       padrões via `grep`; isto varre a cada push, para sempre, e nas chaves de parceiros notifica
