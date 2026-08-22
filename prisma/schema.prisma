@@ -38,9 +38,9 @@ enum TicketStatus {
 }
 
 // ==========================================
-// 1. TENANT (empresa cliente)
+// 1. TENANT (the customer company)
 // ==========================================
-// Nao leva @@unique([tenantId, id]): Tenant nao e tenant-scoped, ele *e* o tenant.
+// No @@unique([tenantId, id]) here: Tenant is not tenant-scoped, it *is* the tenant.
 model Tenant {
   id        String   @id @default(uuid()) @db.Uuid
   name      String   @db.VarChar(255)
@@ -58,7 +58,7 @@ model Tenant {
 }
 
 // ==========================================
-// 2. USER (controle de acesso - RBAC)
+// 2. USER (access control - RBAC)
 // ==========================================
 model User {
   id           String   @id @default(uuid()) @db.Uuid
@@ -68,18 +68,18 @@ model User {
   role         UserRole @default(REQUESTER)
   createdAt    DateTime @default(now()) @map("created_at")
 
-  // SOFT DELETE, e nao por preferencia de estilo: as FKs de AuditLog e de
-  // Ticket.assignee sao RESTRICT (ver o comentario em AuditLog), entao apagar
-  // um usuario com historico falha no proprio banco. Desativar preserva a
-  // trilha de auditoria e o vinculo dos chamados.
+  // SOFT DELETE, and not out of stylistic preference: the FKs from AuditLog and
+  // Ticket.assignee are RESTRICT (see the comment on AuditLog), so deleting a
+  // user with history fails in the database itself. Deactivating preserves the
+  // audit trail and the tickets' links.
   //
-  // Consequencia: o e-mail continua ocupando @@unique([tenantId, email]),
-  // entao recriar um usuario com o mesmo e-mail conflita. E por isso que
-  // existe uma rota de restore em vez de so um create novo.
+  // Consequence: the email keeps occupying @@unique([tenantId, email]), so
+  // recreating a user with the same email conflicts. That is why a restore route
+  // exists instead of just a fresh create.
   //
-  // O filtro `deletedAt: null` vive no service, nao na extension de tenancy:
-  // a extension e sobre tenant, e sobrecarrega-la faria linhas sumirem em
-  // silencio de todo model futuro.
+  // The `deletedAt: null` filter lives in the service, not in the tenancy
+  // extension: the extension is about the tenant, and overloading it would make
+  // rows silently vanish from every future model.
   deletedAt DateTime? @map("deleted_at")
 
   tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -89,12 +89,12 @@ model User {
   auditLogs       AuditLog[]
   refreshTokens   RefreshToken[]
 
-  // Um e-mail nao se repete dentro da mesma empresa, mas pode existir em outra.
+  // An email does not repeat within the same company, but may exist in another.
   @@unique([tenantId, email])
-  // Da a extension um caminho garantido para escopar findUnique por tenant:
+  // Gives the extension a guaranteed way to scope findUnique by tenant:
   //   where: { tenantId_id: { tenantId, id } }
-  // Tambem substitui @@index([tenantId]) - um unique composto em (tenant_id, id)
-  // ja e um indice com tenant_id como coluna lider.
+  // It also replaces @@index([tenantId]) - a composite unique on (tenant_id, id)
+  // is already an index with tenant_id as its leading column.
   @@unique([tenantId, id])
   @@map("users")
 }
@@ -111,23 +111,23 @@ model Ticket {
   description String?      @db.Text
   status      TicketStatus @default(OPEN)
 
-  // CONTROLE OTIMISTA DE CONCORRENCIA.
-  // A atualizacao segura e updateMany({ where: { id, tenantId, version } }) e nao
-  // update(): `update` exige um where unico, e { id, version } nao e unico.
-  // count === 0 significa que outro request ja alterou a linha -> 409 Conflict.
+  // OPTIMISTIC CONCURRENCY CONTROL.
+  // The safe update is updateMany({ where: { id, tenantId, version } }) and not
+  // update(): `update` requires a unique where, and { id, version } is not unique.
+  // count === 0 means another request already changed the row -> 409 Conflict.
   version Int @default(1)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // FKs compostas contra @@unique([tenantId, id]) do pai. Isso faz o proprio
-  // Postgres rejeitar uma referencia a registro de outro tenant, independente de
-  // a extension do Prisma estar correta -- e remove tenantId do input de escrita
-  // aninhada, entao o tenant errado deixa de ser expressavel na API.
+  // Composite FKs against the parent's @@unique([tenantId, id]). This makes
+  // Postgres itself reject a reference to another tenant's record, regardless of
+  // whether the Prisma extension is correct -- and it removes tenantId from the
+  // nested write input, so the wrong tenant stops being expressible in the API.
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   requester User      @relation("TicketRequester", fields: [tenantId, requesterId], references: [tenantId, id])
-  // Restrict e nao SetNull: nao da para anular apenas assigneeId numa chave
-  // composta enquanto tenantId e NOT NULL. Reatribua antes de excluir o usuario.
+  // Restrict and not SetNull: you cannot null out assigneeId alone in a composite
+  // key while tenantId is NOT NULL. Reassign before deleting the user.
   assignee  User?     @relation("TicketAssignee", fields: [tenantId, assigneeId], references: [tenantId, id], onDelete: Restrict)
   comments  Comment[]
 
@@ -137,7 +137,7 @@ model Ticket {
 }
 
 // ==========================================
-// 4. COMMENT (conversa dentro do chamado)
+// 4. COMMENT (the conversation inside a ticket)
 // ==========================================
 model Comment {
   id        String   @id @default(uuid()) @db.Uuid
@@ -157,7 +157,7 @@ model Comment {
 }
 
 // ==========================================
-// 5. AUDIT LOG (trilha de auditoria)
+// 5. AUDIT LOG (the audit trail)
 // ==========================================
 model AuditLog {
   id         String  @id @default(uuid()) @db.Uuid
@@ -167,60 +167,61 @@ model AuditLog {
   entityId   String  @map("entity_id") @db.Uuid
   action     String  @db.VarChar(50)
 
-  // Json do Prisma -> JSONB no PostgreSQL.
+  // Prisma's Json -> JSONB in PostgreSQL.
   oldValues Json? @map("old_values")
   newValues Json? @map("new_values")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  // Restrict pelo mesmo motivo do assignee. Consequencia aceita: a auditoria
-  // impede excluir usuario com historico. O fluxo de exclusao tem que anonimizar
-  // primeiro (auditLog.updateMany -> userId: null), e esquecer isso falha alto.
+  // Restrict for the same reason as assignee. Accepted consequence: the audit
+  // trail prevents deleting a user with history. The deletion flow has to
+  // anonymise first (auditLog.updateMany -> userId: null), and forgetting that
+  // fails loudly.
   user   User?  @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Restrict)
 
   @@unique([tenantId, id])
-  // tenant_id lidera: toda consulta de auditoria e tenant-scoped, e sem ele na
-  // frente o indice nao entra no plano de execucao.
+  // tenant_id leads: every audit query is tenant-scoped, and without it in front
+  // the index does not enter the execution plan.
   @@index([tenantId, entityType, entityId])
   @@map("audit_logs")
 }
 
 // ==========================================
-// 6. REFRESH TOKEN (rotacao e revogacao)
+// 6. REFRESH TOKEN (rotation and revocation)
 // ==========================================
-// Existe para que logout signifique alguma coisa. Um refresh puramente
-// stateless so pode ser invalidado esperando expirar; com a linha aqui, revogar
-// e um UPDATE.
+// Exists so that logging out means something. A purely stateless refresh token
+// can only be invalidated by waiting for it to expire; with the row here,
+// revoking is an UPDATE.
 model RefreshToken {
   id       String @id @default(uuid()) @db.Uuid
   tenantId String @map("tenant_id") @db.Uuid
   userId   String @map("user_id") @db.Uuid
 
-  // sha256 hex do JWT apresentado, sempre 64 caracteres. Hash e nao o token:
-  // um dump do banco nao vira um conjunto de sessoes utilizaveis.
+  // sha256 hex of the presented JWT, always 64 characters. The hash and not the
+  // token: a database dump does not become a set of usable sessions.
   //
-  // sha256 e nao bcrypt de proposito. bcrypt existe para segredo de baixa
-  // entropia escolhido por humano; um token de 256 bits aleatorios nao ganha
-  // nada com KDF lento e pagaria o custo dele a cada rotacao.
+  // sha256 and not bcrypt on purpose. bcrypt exists for low-entropy,
+  // human-chosen secrets; a 256-bit random token gains nothing from a slow KDF
+  // and would pay its cost on every rotation.
   //
-  // @unique global e seguro: a extension injeta tenantId no where do
-  // findUnique, entao um token de outro tenant volta como nao-encontrado.
+  // A global @unique is safe: the extension injects tenantId into the
+  // findUnique where, so another tenant's token comes back as not-found.
   tokenHash String @unique @map("token_hash") @db.VarChar(64)
 
   expiresAt DateTime  @map("expires_at")
-  // Nulo enquanto valido. Preenchido no logout, na rotacao e na deteccao de
-  // reuso -- que revoga a familia inteira do usuario de uma vez.
+  // Null while valid. Filled in on logout, on rotation and on reuse detection --
+  // which revokes the user's entire family at once.
   revokedAt DateTime? @map("revoked_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  // Cascade e nao Restrict: o token nao e historico, e a exclusao de usuario e
-  // soft de qualquer forma. Um hard delete futuro nao deve tropecar nisto.
+  // Cascade and not Restrict: the token is not history, and user deletion is soft
+  // anyway. A future hard delete should not trip over this.
   user   User   @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([tenantId, id])
-  // Para revogar a familia inteira de um usuario numa tacada.
+  // To revoke a user's entire family in one shot.
   @@index([tenantId, userId])
   @@map("refresh_tokens")
 }

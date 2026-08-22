@@ -1,18 +1,18 @@
-## O que muda
+## What changes
 
-<!-- Uma frase. O "porquê" vale mais que o "o quê" — o diff já mostra o quê. -->
+<!-- One sentence. The "why" is worth more than the "what" — the diff already shows the what. -->
 
-## Como verificar
+## How to verify
 
-<!-- Comandos que quem revisa pode rodar, ou o passo a passo manual. -->
+<!-- Commands a reviewer can run, or the manual steps. -->
 
 ## Checklist
 
-- [ ] Os três níveis passam localmente (`npm run test:all`, com `npm run infra:test:up`)
-- [ ] Nenhuma consulta com filtro de tenant escrito à mão (o chokepoint em `src/tenancy/`
-      é quem injeta — ver `CLAUDE.md` → Architecture)
-- [ ] Se um model novo entrou no schema: registrado como escopado ou em `TENANT_AGNOSTIC`
-- [ ] Se uma variável de ambiente nova entrou: `.env.example` e `.env.test` atualizados
-- [ ] `CLAUDE.md` atualizado se alguma decisão de arquitetura mudou
+- [ ] The three tiers pass locally (`npm run test:all`, with `npm run infra:test:up`)
+- [ ] No query with a hand-written tenant filter (the chokepoint in `src/tenancy/`
+      is what injects it — see `CLAUDE.md` → Architecture)
+- [ ] If a new model entered the schema: registered as scoped or in `TENANT_AGNOSTIC`
+- [ ] If a new environment variable was added: `.env.example` and `.env.test` updated
+- [ ] `CLAUDE.md` updated if any architecture decision changed
 
-<!-- PR para a main: só é aceito vindo da development (job guard-main-source). -->
+<!-- A PR into main: only accepted when it comes from development (guard-main-source job). -->

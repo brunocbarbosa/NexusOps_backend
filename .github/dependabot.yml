@@ -1,8 +1,8 @@
-# Atualizações automáticas de dependências.
+# Automated dependency updates.
 #
-# Complementa, não substitui, o job `audit` do ci.yml: o Dependabot abre PR mas
-# não reprova build nenhum, e o `npm audit --audit-level=high` reprova. Um pega
-# o que ainda não foi corrigido, o outro traz a correção.
+# Complements, and does not replace, the `audit` job in ci.yml: Dependabot opens
+# a PR but fails no build, and `npm audit --audit-level=high` does fail one. One
+# catches what has not been fixed yet, the other brings the fix in.
 version: 2
 
 updates:
@@ -14,39 +14,39 @@ updates:
       time: '06:00'
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
-    # PR vai para a development, nunca para a main: `main` só recebe da
-    # development, e o job guard-main-source reprovaria qualquer outra origem.
+    # PRs go to development, never to main: `main` only receives from
+    # development, and the guard-main-source job would fail any other source.
     target-branch: development
     commit-message:
-      # Casa com o commitlint (config-conventional): sem isto, todo PR do
-      # Dependabot reprova no job de commitlint.
+      # Matches commitlint (config-conventional): without this, every Dependabot
+      # PR fails the commitlint job.
       prefix: build
       prefix-development: chore
       include: scope
     ignore:
-      # TypeScript não sobe de major sozinho. Ela tem que andar em lockstep com
-      # o peer do ts-jest, com o typescript-eslint e com o Nest — o primeiro PR
-      # automático que tentou (TS 7) reprovou já no `npm ci`, porque o peer do
-      # ts-jest@29 não aceita. Minor e patch continuam passando normalmente.
+      # TypeScript does not go up a major on its own. It has to move in lockstep
+      # with the ts-jest peer, with typescript-eslint and with Nest — the first
+      # automated PR that tried (TS 7) failed at `npm ci` already, because the
+      # ts-jest@29 peer does not accept it. Minor and patch keep flowing.
       - dependency-name: 'typescript'
         update-types: ['version-update:semver-major']
-      # Os tipos do Node acompanham o runtime que este projeto de fato roda
-      # (node:24-alpine no Dockerfile, node-version: 24 na CI). Tipar contra uma
-      # major mais nova aprova, em tempo de compilação, API que não existe em
-      # produção.
+      # The Node types track the runtime this project actually runs
+      # (node:24-alpine in the Dockerfile, node-version: 24 in CI). Typing
+      # against a newer major approves, at compile time, APIs that do not exist
+      # in production.
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
     groups:
-      # Um PR por ecossistema em vez de um por pacote. As dependências do Nest
-      # sobem em conjunto e revisá-las em sete PRs separados é ruído.
+      # One PR per ecosystem instead of one per package. The Nest dependencies go
+      # up together, and reviewing them across seven separate PRs is noise.
       nestjs:
         patterns: ['@nestjs/*']
       prisma:
         patterns: ['prisma', '@prisma/*']
-      # `@eslint/*` precisa estar aqui explicitamente: o padrão `eslint*` não
-      # casa com um nome que começa por `@`, e sem esta linha o `@eslint/js` sai
-      # num PR solto propondo justamente a dessincronização de major com o
-      # `eslint` — foi o que aconteceu no primeiro dia.
+      # `@eslint/*` has to be here explicitly: the `eslint*` pattern does not
+      # match a name starting with `@`, and without this line `@eslint/js` comes
+      # out in a PR of its own proposing exactly the major desync with `eslint` —
+      # which is what happened on day one.
       types-and-linting:
         patterns:
           [
