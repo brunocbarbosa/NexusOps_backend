@@ -1,9 +1,9 @@
-# Pipeline principal. Roda em PR e em push para as duas branches de longa duração.
+# Main pipeline. Runs on PRs and on pushes to both long-lived branches.
 #
-# `development` é a branch principal deste repositório: é dela que sai todo o
-# trabalho e é ela — e só ela — que abre PR para `main`. O gatilho cobre as duas
-# porque um push direto para `development` é permitido (ver o ruleset da Fase 5),
-# e um push que ninguém verifica não protege nada.
+# `development` is this repository's main branch: all work comes out of it, and
+# it is the one — and the only one — that opens a PR into `main`. The trigger
+# covers both because a direct push to `development` is allowed (see the Phase 5
+# ruleset), and a push nobody checks protects nothing.
 name: CI
 
 on:
@@ -12,14 +12,14 @@ on:
   push:
     branches: [development, main]
 
-# Um push novo na mesma branch torna a execução anterior irrelevante. Sem isto,
-# uma sequência rápida de commits enfileira builds que ninguém vai ler.
+# A new push on the same branch makes the previous run irrelevant. Without this,
+# a quick sequence of commits queues up builds nobody is going to read.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Padrão restritivo; os jobs que precisam de mais (docker → packages: write)
-# elevam localmente.
+# Restrictive default; the jobs that need more (docker → packages: write) raise
+# it locally.
 permissions:
   contents: read
 
@@ -28,40 +28,42 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Os rulesets do GitHub sabem exigir PR, mas não sabem restringir a branch de
-  # *origem* dele. Este job é a única imposição real de "main só recebe da
-  # development" — sem ele, qualquer branch pode abrir PR para a main e o
-  # ruleset aprova.
+  # GitHub rulesets know how to require a PR, but not how to restrict the branch
+  # it comes *from*. This job is the only real enforcement of "main only receives
+  # from development" — without it, any branch can open a PR into main and the
+  # ruleset approves.
   #
-  # Roda sempre, em vez de com `if:` no nível do job, para publicar uma
-  # conclusão de verdade em toda execução: um job pulado aparece como neutro no
-  # status check obrigatório, e a diferença entre "passou" e "nem rodou" é
-  # exatamente o que não se quer ambíguo num guard.
+  # It always runs, rather than carrying a job-level `if:`, so that it publishes
+  # a real conclusion on every run: a skipped job shows up as neutral in the
+  # required status check, and the difference between "passed" and "did not even
+  # run" is exactly what you do not want ambiguous in a guard.
   # ---------------------------------------------------------------------------
   guard-main-source:
     name: guard-main-source
     runs-on: ubuntu-latest
     steps:
       - name: main only accepts pull requests from development
-        # Via env, não interpolado direto no script: `head_ref` é escolhido por
-        # quem abre o PR, e um nome de branch com `$(...)` executaria no runner.
+        # Via env, not interpolated straight into the script: `head_ref` is
+        # chosen by whoever opens the PR, and a branch name containing `$(...)`
+        # would execute on the runner.
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "main" ]; then
-            echo "Não é um PR para a main — nada a impor aqui."
+            echo "Not a PR into main — nothing to enforce here."
             exit 0
           fi
           if [ "$HEAD_REF" != "development" ]; then
-            echo "::error::A main só aceita PR vindo da development; este veio de '$HEAD_REF'."
+            echo "::error::main only accepts PRs coming from development; this one came from '$HEAD_REF'."
             exit 1
           fi
-          echo "OK: PR de development para main."
+          echo "OK: PR from development into main."
 
   # ---------------------------------------------------------------------------
-  # O hook local de commit-msg cai com um `git commit --no-verify`. Aqui não cai.
+  # The local commit-msg hook falls to a `git commit --no-verify`. This one does
+  # not.
   # ---------------------------------------------------------------------------
   commitlint:
     name: commitlint
@@ -70,8 +72,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # commitlint compara um intervalo de commits; um checkout raso não tem
-          # o ancestral comum para calcular esse intervalo.
+          # commitlint compares a range of commits; a shallow checkout does not
+          # have the common ancestor needed to compute that range.
           fetch-depth: 0
 
       - uses: actions/setup-node@v7
@@ -79,11 +81,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      # Sem `prisma generate`: o commitlint lê mensagens de commit, não compila
-      # TypeScript. Gerar o client aqui seriam ~20s por execução sem nenhum uso.
+      # No `prisma generate`: commitlint reads commit messages, it does not
+      # compile TypeScript. Generating the client here would be ~20s per run for
+      # no use at all.
       - run: npm ci
 
-      - name: Validar as mensagens de commit do PR
+      - name: Validate the PR's commit messages
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
@@ -91,9 +94,9 @@ jobs:
           npx commitlint --from "origin/$BASE_REF" --to HEAD --verbose
 
   # ---------------------------------------------------------------------------
-  # Lint, formatação e tipos. É um dos status checks obrigatórios das duas
-  # branches (Fase 5), então o nome do job é contrato — renomear quebra a
-  # proteção em silêncio.
+  # Lint, formatting and types. It is one of the required status checks on both
+  # branches (Phase 5), so the job name is a contract — renaming it breaks the
+  # protection silently.
   # ---------------------------------------------------------------------------
   quality:
     name: quality
@@ -108,41 +111,42 @@ jobs:
 
       - run: npm ci
 
-      # `src/generated/prisma` é gitignored. Sem este passo o tsc não resolve os
-      # imports do client e o job falha por um motivo que não é o código do PR.
-      - name: Gerar o Prisma Client
+      # `src/generated/prisma` is gitignored. Without this step tsc cannot
+      # resolve the client's imports and the job fails for a reason that has
+      # nothing to do with the PR's code.
+      - name: Generate the Prisma Client
         run: npm run prisma:generate
 
-      # Sem `--fix`: o script `npm run lint` reescreve arquivos, o que numa CI
-      # apenas esconde o problema em vez de reprovar.
-      - name: ESLint (somente leitura)
+      # No `--fix`: the `npm run lint` script rewrites files, which in CI only
+      # hides the problem instead of failing on it.
+      - name: ESLint (read-only)
         run: npx eslint "{src,test}/**/*.ts"
 
       - name: Prettier
         run: npm run format:check
 
-      # Os dois, e por motivos diferentes.
+      # Both of them, and for different reasons.
       #
-      # `tsconfig.build.json` é a configuração com que a imagem de produção é
-      # compilada, e `rootDir: ./src` deixa `test/` inteiramente de fora dela.
+      # `tsconfig.build.json` is the configuration the production image is
+      # compiled with, and `rootDir: ./src` leaves `test/` entirely out of it.
       #
-      # O tsconfig raiz cobre `test/`, que de outro modo não seria checado por
-      # ninguém: o `isolatedModules` do repositório põe o ts-jest em modo
-      # transpile-only, então um `const n: number = 'texto'` num spec passa na
-      # suíte inteira sem reclamação. Medido, não suposto.
+      # The root tsconfig covers `test/`, which otherwise nobody would check:
+      # the repository's `isolatedModules` puts ts-jest in transpile-only mode,
+      # so a `const n: number = 'text'` in a spec passes the entire suite without
+      # a complaint. Measured, not assumed.
       - name: TypeScript (build)
         run: npx tsc --noEmit -p tsconfig.build.json
 
-      - name: TypeScript (repositório, inclui test/)
+      - name: TypeScript (repository, includes test/)
         run: npx tsc --noEmit -p tsconfig.json
 
   # ---------------------------------------------------------------------------
-  # Os três níveis contra o mesmo ambiente efêmero que roda localmente.
+  # The three tiers against the same ephemeral environment that runs locally.
   #
-  # `docker compose` em vez do `services:` do Actions: `services:` não sabe
-  # sobrescrever o `command` de um container, e o Redis aqui *precisa* subir com
-  # `--maxmemory-policy noeviction` (CLAUDE.md). Um arquivo de compose único
-  # para os dois ambientes é o que impede que eles divirjam.
+  # `docker compose` instead of Actions' `services:`: `services:` cannot override
+  # a container's `command`, and Redis here *has to* start with
+  # `--maxmemory-policy noeviction` (CLAUDE.md). A single compose file serving
+  # both environments is what keeps them from drifting apart.
   # ---------------------------------------------------------------------------
   test:
     name: test
@@ -157,32 +161,32 @@ jobs:
 
       - run: npm ci
 
-      - name: Gerar o Prisma Client
+      - name: Generate the Prisma Client
         run: npm run prisma:generate
 
-      # O mesmo script que a documentação manda rodar localmente: sobe o compose
-      # de teste com `--wait` e aplica as migrations com o .env.test.
-      - name: Subir o banco efêmero e aplicar as migrations
+      # The same script the documentation tells you to run locally: brings the
+      # test compose up with `--wait` and applies the migrations with .env.test.
+      - name: Start the ephemeral database and apply the migrations
         run: npm run test:setup
 
-      # Os três com `--coverage`. Só o unitário produzia relatório, e isso
-      # subestimava a cobertura pelo desenho da suíte, não pela falta de teste:
-      # controllers, guards, JwtStrategy e RefreshTokenService são exercitados
-      # pelos níveis de integração e e2e por escolha, então ficavam contados
-      # como não cobertos. Medido no PR #26: 54% só com o unitário, 97,7%
-      # somando os três.
-      - name: Testes unitários
+      # All three with `--coverage`. Only the unit tier used to produce a report,
+      # and that understated coverage by the design of the suite rather than by
+      # any absence of tests: controllers, guards, JwtStrategy and
+      # RefreshTokenService are exercised by the integration and e2e tiers by
+      # choice, so they counted as uncovered. Measured on PR #26: 54% from the
+      # unit tier alone, 97.7% across the three.
+      - name: Unit tests
         run: npm run test:unit -- --coverage
 
-      - name: Testes de integração
+      - name: Integration tests
         run: npm run test:int -- --coverage
 
-      - name: Testes e2e
+      - name: e2e tests
         run: npm run test:e2e -- --coverage
 
-      - name: Publicar a cobertura
-        # `always()` para que a cobertura de uma execução que falhou continue
-        # disponível — é justamente quando ela é útil.
+      - name: Upload the coverage
+        # `always()` so that the coverage of a failed run stays available — that
+        # is precisely when it is useful.
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -192,18 +196,18 @@ jobs:
             coverage-integration/
             coverage-e2e/
           retention-days: 7
-          # `warn`, não `error`: com `always()` este passo também roda quando o
-          # job falhou antes de qualquer teste rodar, e aí a ausência de
-          # cobertura é consequência, não uma segunda falha a investigar.
+          # `warn`, not `error`: with `always()` this step also runs when the job
+          # failed before any test ran, and then the absence of coverage is a
+          # consequence, not a second failure to investigate.
           if-no-files-found: warn
 
-      - name: Derrubar o banco efêmero
+      - name: Tear down the ephemeral database
         if: always()
         run: npm run infra:test:down
 
   # ---------------------------------------------------------------------------
-  # Complementa o Dependabot: ele abre PR, mas não reprova build nenhum. Aqui
-  # uma vulnerabilidade alta para a merge.
+  # Complements Dependabot: it opens PRs, but fails no build. Here a high-severity
+  # vulnerability stops the merge.
   # ---------------------------------------------------------------------------
   audit:
     name: audit
@@ -216,63 +220,65 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      # `npm audit` resolve a árvore a partir do package-lock.json; não precisa
-      # de node_modules nem do Prisma Client.
+      # `npm audit` resolves the tree from package-lock.json; it needs neither
+      # node_modules nor the Prisma Client.
       - name: npm audit
         run: npm audit --audit-level=high
 
   # ---------------------------------------------------------------------------
-  # Escrito e desligado. Liga sozinho quando a variável de repositório
-  # SONAR_ENABLED for definida como 'true' (ver "Passos manuais" no checklist).
+  # Written and switched off. It switches itself on when the repository variable
+  # SONAR_ENABLED is set to 'true' (see "Manual steps" in the checklist).
   #
-  # `vars` e não `secrets` na condição: o contexto `secrets` não é avaliável em
-  # `if:` de job, então condicionar a existência do token não funcionaria.
+  # `vars` and not `secrets` in the condition: the `secrets` context is not
+  # evaluable in a job-level `if:`, so conditioning on the token's existence
+  # would not work.
   # ---------------------------------------------------------------------------
   sonar:
     name: sonar
-    # O segundo termo não é preferência: PRs do Dependabot não recebem os secrets
-    # normais do Actions — rodam contra um cofre separado (Dependabot secrets) —
-    # então `secrets.SONAR_TOKEN` chega vazio e o scanner morre com
-    # "Not authorized or project not found". As `vars` chegam, o que torna a
-    # falha confusa: o job roda porque SONAR_ENABLED está lá, e falha porque o
-    # token não está. Duplicar o token no outro cofre resolveria, mas analisar um
-    # bump de lockfile no Sonar não agrega nada que justifique espalhar a
-    # credencial.
+    # The second term is not a preference: Dependabot PRs do not receive the
+    # normal Actions secrets — they run against a separate store (Dependabot
+    # secrets) — so `secrets.SONAR_TOKEN` arrives empty and the scanner dies with
+    # "Not authorized or project not found". The `vars` do arrive, which makes
+    # the failure confusing: the job runs because SONAR_ENABLED is there, and
+    # fails because the token is not. Duplicating the token into the other store
+    # would fix it, but analysing a lockfile bump in Sonar adds nothing that
+    # justifies spreading the credential around.
     if: vars.SONAR_ENABLED == 'true' && github.actor != 'dependabot[bot]'
     needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          # O Sonar usa o histórico para atribuir issues a autores e para
-          # calcular o "new code" de um PR.
+          # Sonar uses the history to attribute issues to authors and to compute
+          # a PR's "new code".
           fetch-depth: 0
 
-      # Na raiz: o artefato traz os três diretórios de cobertura, um por nível.
-      - name: Baixar a cobertura do job de teste
+      # At the root: the artifact carries the three coverage directories, one per
+      # tier.
+      - name: Download the coverage from the test job
         uses: actions/download-artifact@v8
         with:
           name: coverage
           path: .
 
-      # `sonar.tests` inclui `src` porque os specs unitários moram ao lado do
-      # código, e `sonar.sources=src` sozinho os analisava como código de
-      # produção. Duas consequências, as duas medidas no PR #26: os specs
-      # entravam no denominador de cobertura sem nunca serem cobertos (61,2%
-      # reportados contra 91,7% reais), e as senhas de fixture viravam
-      # "hard-coded password" de severidade MAJOR, derrubando o
-      # `new_security_rating` para 3. Os specs de `test/` nunca sofreram disso
-      # justamente por já estarem em `sonar.tests`.
+      # `sonar.tests` includes `src` because the unit specs live next to the
+      # code, and `sonar.sources=src` alone analysed them as production code. Two
+      # consequences, both measured on PR #26: the specs entered the coverage
+      # denominator without ever being covered (61.2% reported against 91.7%
+      # real), and the fixture passwords were raised as MAJOR "hard-coded
+      # password" findings, dropping `new_security_rating` to 3. The specs under
+      # `test/` never suffered from either, precisely because they were already
+      # in `sonar.tests`.
       #
-      # As três propriedades trabalham juntas: `exclusions` tira os specs de
-      # `sources` para que nenhum arquivo seja indexado duas vezes, e
-      # `test.inclusions` delimita o que, dentro de `test,src`, é teste.
+      # The three properties work together: `exclusions` takes the specs out of
+      # `sources` so no file is indexed twice, and `test.inclusions` delimits
+      # what, inside `test,src`, counts as a test.
       #
-      # v6 e não v5: a v5 carrega uma vulnerabilidade high de argument injection
-      # (GHSA, corrigida na 6.0.0), e a própria ação imprime esse aviso a cada
-      # execução. Aqui o `args` só recebe variáveis de repositório, que apenas um
-      # admin define — mas não há razão para manter a versão vulnerável quando a
-      # v6 aceita exatamente os mesmos inputs.
+      # v6 and not v5: v5 carries a high-severity argument injection
+      # vulnerability (GHSA, fixed in 6.0.0), and the action itself prints that
+      # warning on every run. Here `args` only receives repository variables,
+      # which only an admin sets — but there is no reason to keep the vulnerable
+      # version when v6 accepts exactly the same inputs.
       - uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -287,8 +293,8 @@ jobs:
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info,coverage-integration/lcov.info,coverage-e2e/lcov.info
 
   # ---------------------------------------------------------------------------
-  # Build em todo PR (o Dockerfile é código e quebra como código); push só em
-  # push na main.
+  # Builds on every PR (the Dockerfile is code and breaks like code); pushes only
+  # on a push to main.
   # ---------------------------------------------------------------------------
   docker:
     name: docker
@@ -305,30 +311,31 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      # Só para ter a CLI do Prisma e aplicar as migrations no banco contra o
-      # qual o smoke test da imagem roda. A imagem não carrega a CLI.
+      # Only to have the Prisma CLI and apply the migrations to the database the
+      # image's smoke test runs against. The image does not carry the CLI.
       - run: npm ci
 
-      - name: Subir o banco efêmero e aplicar as migrations
+      - name: Start the ephemeral database and apply the migrations
         run: npm run test:setup
 
       - uses: docker/setup-buildx-action@v4
 
-      - name: Calcular as tags
+      - name: Compute the tags
         id: meta
         uses: docker/metadata-action@v6
         with:
-          # Literal em minúsculas de propósito: o GHCR rejeita maiúsculas e
-          # `github.repository` é "brunocbarbosa/NexusOps_backend".
+          # A lowercase literal on purpose: GHCR rejects uppercase and
+          # `github.repository` is "brunocbarbosa/NexusOps_backend".
           images: ghcr.io/brunocbarbosa/nexusops_backend
           tags: |
             type=raw,value=latest
             type=sha,prefix=sha-,format=short
 
-      # `load: true` e sem `push:`. A imagem tem que existir no daemon local
-      # para os dois testes abaixo, e publicar antes de testar seria publicar no
-      # escuro. O push acontece depois, sobre estas mesmas tags já construídas.
-      - name: Build da imagem
+      # `load: true` and no `push:`. The image has to exist in the local daemon
+      # for the two tests below, and publishing before testing would be
+      # publishing blind. The push happens afterwards, over these same tags that
+      # were already built.
+      - name: Build the image
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -337,26 +344,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Guarda do defeito do .tsbuildinfo (Fase 3): um cache incremental fora do
-      # que o `deleteOutDir` limpa faz um build limpo emitir zero arquivos e sair
-      # com código 0. O `COPY` de um dist/ vazio não falha, então a imagem só
-      # se denuncia ao tentar subir.
-      - name: A imagem sobe e responde HTTP
+      # Guard against the .tsbuildinfo defect (Phase 3): an incremental cache
+      # outside of what `deleteOutDir` cleans makes a clean build emit zero files
+      # and exit 0. The `COPY` of an empty dist/ does not fail either, so the
+      # image only gives itself away when you try to boot it.
+      - name: The image boots and answers HTTP
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
-          # Qualquer uma das tags aponta para a mesma imagem; a primeira linha
-          # basta e não depende da ordem de prioridade do metadata-action.
+          # Any of the tags points at the same image; the first line is enough
+          # and does not depend on metadata-action's priority ordering.
           IMAGE_REF="$(echo "$TAGS" | head -n1)"
-          # A aplicação valida o ambiente no boot e sai se faltar variável, então
-          # subir sem nenhuma testaria a validação e não o build. Mesma fonte de
-          # verdade do passo seguinte: o `.env.test` que a suíte já usa.
+          # The application validates its environment at boot and exits on a
+          # missing variable, so booting it with none would test the validation
+          # and not the build. Same source of truth as the next step: the
+          # .env.test the suite already uses.
           #
-          # NODE_ENV não é repassado de propósito — fica o `production` da
-          # imagem, o que faz este passo exercitar também a recusa do
-          # JWT_SECRET placeholder. O banco não precisa existir: o Prisma
-          # conecta na primeira query, e aqui nenhuma acontece.
+          # NODE_ENV is deliberately not passed through — the image keeps its own
+          # `production`, which makes this step also exercise the placeholder
+          # JWT_SECRET refusal. The database does not need to exist: Prisma
+          # connects on the first query, and none happens here.
           set -a
           . ./.env.test
           set +a
@@ -371,30 +379,30 @@ jobs:
             "$IMAGE_REF"
           for i in $(seq 1 30); do
             if curl -fsS localhost:3000 > /dev/null; then
-              echo "OK: a imagem respondeu em $i tentativa(s)."
+              echo "OK: the image answered after $i attempt(s)."
               docker stop nexusops-boot
               exit 0
             fi
             sleep 1
           done
-          echo "::error::A imagem não respondeu na porta 3000 em 30s."
+          echo "::error::The image did not answer on port 3000 within 30s."
           docker logs nexusops-boot
           docker stop nexusops-boot
           exit 1
 
-      # O Dockerfile remove a CLI do Prisma, o Studio, as engines legadas e todo
-      # query compiler que não seja o de PostgreSQL. Tudo isso carrega sob
-      # demanda: uma poda errada não aparece no boot, só na primeira query real.
-      # Este passo é o que impede a poda de virar uma alegação não verificada.
-      - name: Smoke test do Prisma dentro da imagem
+      # The Dockerfile removes the Prisma CLI, Studio, the legacy engines and
+      # every query compiler that is not PostgreSQL's. All of it loads lazily: a
+      # wrong prune does not show up at boot, only on the first real query. This
+      # step is what keeps the prune from becoming an unverified claim.
+      - name: Prisma smoke test inside the image
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
           IMAGE_REF="$(echo "$TAGS" | head -n1)"
-          # Uma fonte de verdade para a URL: o mesmo .env.test que a suíte usa.
-          # `set -a` exporta e o shell tira as aspas — `--env-file` do docker as
-          # passaria literalmente para dentro da variável.
+          # One source of truth for the URL: the same .env.test the suite uses.
+          # `set -a` exports and the shell strips the quotes — docker's
+          # `--env-file` would pass them literally into the variable.
           set -a
           . ./.env.test
           set +a
@@ -403,7 +411,7 @@ jobs:
             "$IMAGE_REF" \
             node scripts/docker-smoke.js
 
-      - name: Login no GHCR
+      - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
@@ -411,10 +419,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # `docker push` direto em vez de um segundo build-push-action: a imagem já
-      # está construída e testada, e reconstruí-la para publicar significaria
-      # publicar um artefato que não é bit a bit o que passou nos testes acima.
-      - name: Publicar no GHCR
+      # A plain `docker push` instead of a second build-push-action: the image is
+      # already built and tested, and rebuilding it to publish would mean
+      # publishing an artifact that is not bit-for-bit what passed the tests
+      # above.
+      - name: Publish to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
@@ -422,6 +431,6 @@ jobs:
           set -euo pipefail
           echo "$TAGS" | xargs -rn1 docker push
 
-      - name: Derrubar o banco efêmero
+      - name: Tear down the ephemeral database
         if: always()
         run: npm run infra:test:down

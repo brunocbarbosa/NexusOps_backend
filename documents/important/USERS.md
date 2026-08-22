@@ -1,178 +1,179 @@
-# Autenticação e usuários — comportamento medido
+# Authentication and users — measured behaviour
 
-Leia antes de mexer em `src/auth/`, `src/users/` ou nos DTOs de qualquer módulo novo.
+Read this before editing `src/auth/`, `src/users/`, or the DTOs of any new module.
 
-Tudo abaixo foi **medido neste repositório**, contra Prisma 7.9.1, bcrypt 6.0.0, class-transformer
-0.5.1 e `@nestjs/config` 4. Não são recomendações de documentação: são coisas que o código depende
-de serem verdade, com o teste que avisa quando deixarem de ser.
+Everything below was **measured in this repository**, against Prisma 7.9.1, bcrypt 6.0.0,
+class-transformer 0.5.1 and `@nestjs/config` 4. These are not recommendations taken from
+documentation: they are things the code depends on being true, each with the test that will tell
+you when one of them stops being so.
 
-As regras que valem em todo o resto do código — nunca escrever filtro de tenant à mão, workers não
-têm contexto de request — estão no `CLAUDE.md`, em "Architecture". Este arquivo é o _porquê_ das
-decisões desta fatia.
+The rules that apply everywhere else in the codebase — never hand-write a tenant filter, workers
+have no request context — are in `CLAUDE.md` under "Architecture". This file is the _why_ behind
+the decisions in this slice.
 
-## O tenant antes de existir tenant
+## The tenant before a tenant exists
 
-`User.email` só é único dentro de um tenant, então o e-mail sozinho é ambíguo entre empresas. O
-login carrega `tenantDomain` no corpo e resolve o `Tenant` primeiro. São **três** os lugares em
-todo o código que rodam sem tenant, e a lista é curta de propósito — um `grep runWithoutTenant`
-audita a superfície inteira:
+`User.email` is only unique within a tenant, so an email address alone is ambiguous across
+companies. Login carries `tenantDomain` in the body and resolves the `Tenant` first. There are
+**three** places in the whole codebase that run without a tenant, and the list is deliberately
+short — a single `grep runWithoutTenant` audits the entire surface:
 
-| Onde                        | Por quê                                              |
-| --------------------------- | ---------------------------------------------------- |
-| `AuthService.register`      | o `Tenant` está sendo criado                         |
-| `AuthService.login`         | o `Tenant` ainda não foi identificado                |
-| limpeza das suítes de teste | apagar "de todos os tenants" é exatamente a intenção |
+| Where                  | Why                                                |
+| ---------------------- | -------------------------------------------------- |
+| `AuthService.register` | the `Tenant` is being created                      |
+| `AuthService.login`    | the `Tenant` has not been identified yet           |
+| test suite cleanup     | deleting "from every tenant" is exactly the intent |
 
-`AuthService.refresh` **não** está na lista, e essa é a razão de o `tenantId` viajar dentro do
-refresh token: refresh acontece justamente quando o access token expirou, então não há usuário
-autenticado nem escopo para herdar — e a tabela de tokens é escopada como todas as outras, então a
-consulta não roda sem escopo nenhum. Carregar o tenant na claim é o que permite abrir o escopo
-antes da primeira query em vez de deixar essa busca desescopada.
+`AuthService.refresh` is **not** on the list, and that is the reason `tenantId` travels inside the
+refresh token: a refresh happens precisely when the access token has expired, so there is no
+authenticated user and no scope to inherit — and the token table is scoped like every other one, so
+the query does not run unscoped. Carrying the tenant in the claim is what makes it possible to open
+the scope before the first query instead of leaving that lookup unscoped.
 
-## `$transaction` que troca de escopo no meio
+## A `$transaction` that changes scope halfway through
 
-`register()` cria o `Tenant` sob `runWithoutTenant()` e o primeiro `ADMIN` sob
-`runWithTenant(tenant.id)`, **na mesma transação** — separá-las deixaria uma empresa existindo sem
-ninguém que consiga entrar nela.
+`register()` creates the `Tenant` under `runWithoutTenant()` and the first `ADMIN` under
+`runWithTenant(tenant.id)`, **inside the same transaction** — splitting them would leave a company
+existing with nobody able to log into it.
 
-Duas propriedades do Prisma 7.9.1 sustentam isso, e as duas foram medidas:
+Two properties of Prisma 7.9.1 hold that together, and both were measured:
 
-- **A extensão se aplica ao client transacional.** O `tx` do callback carimba o `tenantId` e recusa
-  escrita cross-tenant igual ao client de fora. Uma transação não é um caminho para contornar o
-  chokepoint.
-- **O `AsyncLocalStorage` atravessa os `await` de dentro do callback.** O escopo aberto _depois_ de
-  a transação já ter começado continua valendo para as queries seguintes.
+- **The extension applies to the transactional client.** The callback's `tx` stamps `tenantId` and
+  refuses a cross-tenant write exactly like the client outside it. A transaction is not a way around
+  the chokepoint.
+- **`AsyncLocalStorage` survives the `await`s inside the callback.** A scope opened _after_ the
+  transaction has already started still applies to the queries that follow.
 
-`test/integration/auth-registration.int-spec.ts` fixa as duas, mais o rollback: quando a escrita
-escopada falha, o tenant vai junto.
+`test/integration/auth-registration.int-spec.ts` pins both, plus the rollback: when the scoped write
+fails, the tenant goes with it.
 
-## O interceptor e a preguiça do Observable
+## The interceptor and the laziness of the Observable
 
-`TenantContextInterceptor` é interceptor e não middleware porque em tempo de middleware
-`request.user` ainda não existe — os guards não rodaram — e decodificar o JWT de novo ali criaria
-um segundo lugar decidindo quem é o chamador.
+`TenantContextInterceptor` is an interceptor and not middleware because at middleware time
+`request.user` does not exist yet — the guards have not run — and decoding the JWT again there would
+create a second place deciding who the caller is.
 
-A armadilha é a mesma preguiça do `PrismaPromise` descrita em
-[`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md): devolver `next.handle()` de dentro de
-`runWithTenant` entrega um Observable **não inscrito**, e a inscrição acontece depois de o escopo
-já ter fechado. O corpo precisa ser
+The trap is the same `PrismaPromise` laziness described in
+[`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md): returning `next.handle()` from inside
+`runWithTenant` hands back an **unsubscribed** Observable, and the subscription happens after the
+scope has already closed. The body has to be
 `from(runWithTenant(id, () => firstValueFrom(next.handle(), { defaultValue: undefined })))`.
 
-**Custo aceito:** converter para promise mantém só a primeira emissão, então `@Sse` e qualquer
-handler de múltiplas emissões não funcionam sob este interceptor. Rotas REST e `StreamableFile`
-(que emite um objeto só) não são afetadas.
+**Accepted cost:** converting to a promise keeps only the first emission, so `@Sse` and any
+multi-emission handler do not work under this interceptor. REST routes and `StreamableFile` (which
+emits a single object) are unaffected.
 
-O `defaultValue` existe porque `firstValueFrom` rejeita com `EmptyError` num Observable que
-completa sem emitir, o que um interceptor mais interno pode produzir.
+The `defaultValue` is there because `firstValueFrom` rejects with `EmptyError` on an Observable that
+completes without emitting, which an inner interceptor can produce.
 
-## `tenantScoped()` existe por causa dos tipos, não do runtime
+## `tenantScoped()` exists because of the types, not the runtime
 
-A extensão carimba `tenantId` em todo `create`. Os tipos gerados pelo Prisma discordam: `User` tem
-relação obrigatória com `Tenant`, então `UserCreateInput` exige `tenantId` ou `tenant: { connect }`
-e um `{ email, passwordHash }` puro é erro de compilação. Sem uma ponte, todo service acabaria
-escrevendo o tenant à mão — o que esta camada existe para eliminar.
+The extension stamps `tenantId` on every `create`. Prisma's generated types disagree: `User` has a
+required relation to `Tenant`, so `UserCreateInput` demands `tenantId` or `tenant: { connect }`, and
+a bare `{ email, passwordHash }` is a compile error. Without a bridge, every service would end up
+writing the tenant by hand — which is what this layer exists to eliminate.
 
-`tenantScoped()` **não é um cast**. Ele calcula o valor de verdade, via `requireTenantId()`, da
-mesma fonte que a extensão usaria. Um cast satisfaria o compilador deixando o objeto sem o campo, e
-no dia em que a extensão parasse de disparar para alguma operação a escrita cairia com
-`tenantId: undefined` em vez de falhar. Assim as duas metades se conferem em vez de confiarem uma
-na outra: `requireTenantId()` lança sem escopo, e o `stampTenant` da extensão ainda recusa
-divergência.
+`tenantScoped()` is **not a cast**. It computes the real value, via `requireTenantId()`, from the
+same source the extension would use. A cast would satisfy the compiler while leaving the object
+without the field, and the day the extension stopped firing for some operation the write would land
+with `tenantId: undefined` instead of failing. This way the two halves check each other instead of
+trusting one another: `requireTenantId()` throws when there is no scope, and the extension's
+`stampTenant` still refuses a mismatch.
 
-Creates aninhados não precisam dele: as FKs compostas fazem o Prisma regerar o input aninhado sem
-campo `tenantId` nenhum.
+Nested creates do not need it: the composite FKs make Prisma regenerate the nested input with no
+`tenantId` field at all.
 
 ## Refresh tokens
 
-**Chave separada, não a mesma com validade maior.** Access e refresh carregam quase as mesmas
-claims. Sob uma chave só, o refresh token — válido por dias — é aceito como bearer pelo
-`JwtStrategy`, e os 15 minutos do access deixam de significar qualquer coisa. Com duas chaves a
-checagem de assinatura recusa, sem depender de ninguém lembrar de uma claim `type`. O `validateEnv`
-recusa a aplicação subir com as duas iguais, porque isso desfaz a separação em silêncio.
+**A separate key, not the same one with a longer lifetime.** Access and refresh tokens carry almost
+the same claims. Under a single key the refresh token — valid for days — is accepted as a bearer
+token by `JwtStrategy`, and the access token's 15 minutes stop meaning anything. With two keys the
+signature check refuses it, without depending on anyone remembering a `type` claim. `validateEnv`
+refuses to let the application boot with the two equal, because that undoes the separation silently.
 
-**sha256 e não bcrypt no armazenamento.** bcrypt é lento de propósito, para encarecer adivinhação
-de segredo escolhido por humano. Num token de 256 bits assinado não há o que adivinhar: a lentidão
-não compraria segurança e seria paga a cada rotação. O hash existe para que um dump do banco não
-seja um conjunto de sessões utilizáveis.
+**sha256 and not bcrypt for storage.** bcrypt is deliberately slow, to make guessing a
+human-chosen secret expensive. In a signed 256-bit token there is nothing to guess: the slowness
+would buy no security and would be paid on every rotation. The hash is there so that a database dump
+is not a set of usable sessions.
 
-**`consume()` é um `updateMany` único filtrado por `revokedAt: null`.** Não é read-then-write, e a
-diferença é a única coisa que faz a detecção de reúso funcionar: com read-then-write dois refreshes
-simultâneos veem `null`, os dois rotacionam e os dois recebem par novo — exatamente o cenário de
-token roubado que a detecção existe para pegar. É a mesma forma de controle otimista do agregado de
-ticket. Afirmação de concorrência não se verifica lendo código:
-`test/integration/refresh-token.int-spec.ts` dispara cinco consumidores simultâneos no mesmo token
-e prova que **exatamente um** ganha.
+**`consume()` is a single `updateMany` filtered by `revokedAt: null`.** It is not read-then-write,
+and that difference is the only thing that makes reuse detection work: with read-then-write two
+simultaneous refreshes both see `null`, both rotate, and both get a new pair — exactly the
+stolen-token scenario the detection exists to catch. It is the same shape of optimistic control as
+the ticket aggregate. A claim about concurrency cannot be verified by reading code:
+`test/integration/refresh-token.int-spec.ts` fires five simultaneous consumers at the same token and
+proves that **exactly one** wins.
 
-**Reúso revoga a família inteira.** Um token já gasto voltando significa que duas partes o têm, e
-daqui não dá para dizer qual é a legítima. Ambas fazem login de novo; a alternativa deixa o ladrão
-com uma cadeia funcionando ao lado do dono.
+**Reuse revokes the entire family.** An already-spent token coming back means two parties hold it,
+and from here there is no telling which one is legitimate. Both log in again; the alternative leaves
+the thief with a working chain running alongside the owner's.
 
-**`expires_at` é lido do `exp` do token assinado**, não reparseado da string de duração. Uma fonte
-de verdade, e a linha não pode alegar validade diferente do token que descreve. A coluna serve para
-um job futuro de limpeza e para auditoria; quem barra token expirado é o `jsonwebtoken`.
+**`expires_at` is read from the signed token's `exp`**, not re-parsed from the duration string. One
+source of truth, and the row cannot claim a validity different from the token it describes. The
+column serves a future cleanup job and auditing; what rejects an expired token is `jsonwebtoken`.
 
-## bcrypt trunca em 72 bytes e não avisa
+## bcrypt truncates at 72 bytes and says nothing
 
-Medido contra bcrypt 6.0.0: `hash()` de 81 caracteres seguido de `compare()` com uma senha
-diferente que compartilhe os 72 primeiros devolve **`true`**, e `hash()` não lança com entrada
-longa. Duas senhas longas viram a mesma credencial, e quem escolheu uma passphrase recebe bem menos
-segurança do que o comprimento sugere.
+Measured against bcrypt 6.0.0: `hash()` of 81 characters followed by `compare()` with a different
+password that shares the first 72 returns **`true`**, and `hash()` does not throw on long input. Two
+long passwords become the same credential, and whoever chose a passphrase gets far less security
+than its length suggests.
 
-Daí `@MaxBytes(72)` em `src/auth/password.constraints.ts` — **bytes**, não caracteres: um emoji
-custa quatro, e um `@MaxLength(72)` deixaria passar 288 bytes dos quais o bcrypt guardaria 18.
+Hence `@MaxBytes(72)` in `src/auth/password.constraints.ts` — **bytes**, not characters: an emoji
+costs four, and a `@MaxLength(72)` would let through 288 bytes of which bcrypt would keep 18.
 
-## Mensagem igual não basta: o tempo também denuncia
+## An identical message is not enough: timing gives it away too
 
-Login responde a mesma 401 para tenant inexistente, usuário inexistente e senha errada. Isso
-sozinho não resolve: pular o bcrypt no caminho não-encontrado fazia a resposta sair em ~1ms contra
-~50ms do caminho encontrado, e um cronômetro responde "esta conta existe?" que a mensagem se
-recusou a responder.
+Login answers the same 401 for a nonexistent tenant, a nonexistent user and a wrong password. That
+alone does not settle it: skipping bcrypt on the not-found path made the response come back in ~1ms
+against ~50ms on the found path, and a stopwatch answers "does this account exist?" — the question
+the message refused to answer.
 
-`HashingService.compareWithDecoy()` gasta o mesmo tempo. O hash-isca é construído no
-`onModuleInit` a partir do custo configurado, não fixo no código: um hash de bcrypt carrega o
-próprio cost factor, então um isca fixo queimaria tempo diferente dos hashes reais e reintroduziria
-a diferença que existe para esconder.
+`HashingService.compareWithDecoy()` spends the same time. The decoy hash is built in `onModuleInit`
+from the configured cost, not hard-coded: a bcrypt hash carries its own cost factor, so a fixed
+decoy would burn a different amount of time than the real hashes and reintroduce the very difference
+it exists to hide.
 
-## Soft delete contra o e-mail único
+## Soft delete versus the unique email
 
-Exclusão de usuário é lógica porque as FKs de `audit_logs` e de `tickets.assignee` são `RESTRICT` —
-apagar um usuário com histórico falha no próprio banco.
+Deleting a user is logical because the FKs from `audit_logs` and `tickets.assignee` are `RESTRICT` —
+deleting a user with history fails in the database itself.
 
-Medido: recriar um usuário com o e-mail de um desativado falha com **`P2002` em
-`(tenant_id, email)`**. O endereço continua ocupado enquanto a linha existir. É por isso que:
+Measured: recreating a user with a deactivated user's email fails with **`P2002` on
+`(tenant_id, email)`**. The address stays taken for as long as the row exists. That is why:
 
-- `POST /users` distingue os dois casos por trás do mesmo `P2002` e devolve o id a restaurar;
-- `POST /users/:id/restore` existe — restaurar traz a **mesma** linha de volta, com o histórico
-  ainda ligado a ela, o que um create novo não faria;
-- restore nunca colide: o endereço esteve ocupado o tempo todo, ninguém pôde tomá-lo.
+- `POST /users` tells the two cases apart behind the same `P2002` and returns the id to restore;
+- `POST /users/:id/restore` exists — restoring brings the **same** row back, with its history still
+  attached to it, which a fresh create would not do;
+- a restore never collides: the address was taken the whole time, so nobody could claim it.
 
-**O filtro `deletedAt: null` fica no service, não na extensão.** Colocá-lo ao lado do filtro de
-tenant pareceria simétrico e seria um erro: a extensão é sobre tenant, e ensiná-la a esconder
-linhas faria todo model futuro perder registros que ninguém pediu para esconder.
+**The `deletedAt: null` filter lives in the service, not in the extension.** Putting it next to the
+tenant filter would look symmetric and would be a mistake: the extension is about the tenant, and
+teaching it to hide rows would make every future model lose records nobody asked to hide.
 
-## `Boolean('false')` é `true`
+## `Boolean('false')` is `true`
 
-O pipe global roda com `enableImplicitConversion`, e query string só carrega texto. O resultado é
-que `?includeDeleted=false` chegava como `true` — o oposto do pedido, em silêncio.
+The global pipe runs with `enableImplicitConversion`, and a query string only carries text. The
+result was that `?includeDeleted=false` arrived as `true` — the opposite of what was asked, silently.
 
-A parte que vale registrar: **um `@Transform` sozinho não resolve.** Medido com o pipe real, a
-conversão implícita roda **antes** do transform, que então recebe um booleano já errado — `'false'`
-e `'maybe'` chegavam os dois como `true`. `@Type(() => String)` na propriedade é o que redireciona a
-conversão e deixa o texto cru para o transform ler.
+The part worth recording: **a `@Transform` on its own does not fix it.** Measured with the real
+pipe, the implicit conversion runs **before** the transform, which then receives an already-wrong
+boolean — `'false'` and `'maybe'` both arrived as `true`. `@Type(() => String)` on the property is
+what redirects the conversion and leaves the raw text for the transform to read.
 
-`src/users/dto/query-users.dto.spec.ts` roda pelo **mesmo** `VALIDATION_PIPE_OPTIONS` que
-`configureApp` usa, exportado de `src/app.setup.ts` justamente para isso: um spec que montasse as
-próprias opções não provaria nada sobre este caso.
+`src/users/dto/query-users.dto.spec.ts` runs through the **same** `VALIDATION_PIPE_OPTIONS` that
+`configureApp` uses, exported from `src/app.setup.ts` precisely for this: a spec that built its own
+options would prove nothing about this case.
 
-Vale para qualquer flag booleana em query string de qualquer módulo futuro.
+This holds for any boolean query-string flag in any future module.
 
-## Duas escolhas de API que parecem detalhe
+## Two API choices that look like details
 
-**404 e nunca 403 para recurso de outro tenant.** A extensão filtra, então o id simplesmente não é
-encontrado. Um 403 confirmaria que o id existe em algum lugar, que é um fato sobre o dado de outra
-empresa. O 403 fica para papel insuficiente, onde não há nada a revelar.
+**404 and never 403 for another tenant's resource.** The extension filters, so the id is simply not
+found. A 403 would confirm that the id exists somewhere, which is a fact about another company's
+data. 403 is reserved for insufficient role, where there is nothing to reveal.
 
-**`UpdateUserDto` é escrito à mão, não `PartialType(CreateUserDto)`.** O derivado herdaria
-`password`, e trocar a senha de outra pessoa pela mesma rota que a renomeia é exatamente a forma
-de uma ação de admin ampla demais virar tomada de conta. Senha só por `PATCH /users/me/password`,
-que exige a atual e encerra todas as sessões.
+**`UpdateUserDto` is written by hand, not `PartialType(CreateUserDto)`.** The derived version would
+inherit `password`, and changing someone else's password through the same route that renames them is
+exactly how an overly broad admin action turns into an account takeover. Passwords only through
+`PATCH /users/me/password`, which requires the current one and ends every session.
