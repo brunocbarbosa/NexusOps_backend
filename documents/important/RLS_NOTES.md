@@ -1,21 +1,22 @@
-# Row-Level Security — notas de implementação
+# Row-Level Security — implementation notes
 
-> **Status: não implementado.** Não existe nenhuma policy, nenhum `set_config` e nenhuma role de
-> baixo privilégio no código hoje. Este documento é a preparação para quando essa camada for
-> escrita, e existe porque as medições abaixo custaram tempo de depuração real — perdê-las
-> significaria pagar de novo.
+> **Status: not implemented.** There is no policy, no `set_config` and no low-privilege role in the
+> code today. This document is the preparation for when that layer gets written, and it exists
+> because the measurements below cost real debugging time — losing them would mean paying for them
+> again.
 
-## Por que RLS, se a extensão já filtra
+## Why RLS, if the extension already filters
 
-A extensão do Prisma Client em `src/tenancy/` é a primeira camada de isolamento entre tenants. A
-RLS é a **segunda**, deliberadamente redundante, para o caso de a primeira ser contornada — SQL
-cru, ou um defeito na própria extensão.
+The Prisma Client extension in `src/tenancy/` is the first layer of isolation between tenants. RLS
+is the **second**, deliberately redundant one, for the case where the first is bypassed — raw SQL,
+or a defect in the extension itself.
 
-`$queryRaw` / `$executeRaw` são operações de client, não de model, e nunca passam pela extensão.
-Esse é o buraco concreto que a RLS fecha. Ver [`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md)
-para o que a extensão cobre e o que ela não alcança.
+`$queryRaw` / `$executeRaw` are client operations, not model operations, and never go through the
+extension. That is the concrete hole RLS closes. See
+[`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md) for what the extension covers and what it cannot
+reach.
 
-## As duas armadilhas, medidas neste repositório
+## The two traps, measured in this repository
 
 RLS will be inert in this project until the application stops connecting as `nexusops`. Two
 mechanisms, and the second is the one that bites — both measured against this repo's own container,
@@ -49,16 +50,15 @@ So the tenant must be set with `set_config('app.tenant_id', $1, true)` — the t
 `is_local` — inside an **interactive** `$transaction(async (tx) => ...)`, which pins one connection
 and resets the value at commit. The array form of `$transaction` does not give that guarantee.
 
-## Resumo do que precisa ser feito
+## Summary of what still has to be done
 
-1. Provisionar uma role `NOSUPERUSER NOBYPASSRLS` que **não** seja dona das tabelas, com DML apenas.
-   `.env.example` já reserva `DATABASE_URL_APP` para ela; as migrations continuam usando a role
-   proprietária.
-2. Criar as policies e aplicar `ALTER TABLE ... FORCE ROW LEVEL SECURITY`.
-3. Fazer a aplicação estabelecer o tenant com `set_config('app.tenant_id', $1, true)` dentro de um
-   `$transaction(async (tx) => ...)` **interativo**.
-4. Escrever os testes de integração que provem que as policies barram acesso cross-tenant — o
-   `docker-compose.test.yml` precisará provisionar a role de baixo privilégio para isso.
+1. Provision a `NOSUPERUSER NOBYPASSRLS` role that does **not** own the tables, with DML only.
+   `.env.example` already reserves `DATABASE_URL_APP` for it; migrations keep using the owning role.
+2. Create the policies and apply `ALTER TABLE ... FORCE ROW LEVEL SECURITY`.
+3. Make the application set the tenant with `set_config('app.tenant_id', $1, true)` inside an
+   **interactive** `$transaction(async (tx) => ...)`.
+4. Write the integration tests that prove the policies block cross-tenant access —
+   `docker-compose.test.yml` will need to provision the low-privilege role for that.
 
-O item 4 é o que transforma esta camada de "configurada" em "verificada". Sem ele, as policies
-podem estar inertes e o `pg_policies` continuaria mostrando tudo correto.
+Item 4 is what turns this layer from "configured" into "verified". Without it, the policies may be
+inert and `pg_policies` would still show everything as correct.

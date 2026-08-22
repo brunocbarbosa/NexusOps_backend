@@ -1,9 +1,9 @@
-# Análise estática de segurança nativa do GitHub. Gratuita neste repositório
-# porque a Fase 0 o tornou público.
+# GitHub's native static security analysis. Free on this repository because
+# Phase 0 made it public.
 #
-# Separada do ci.yml de propósito: o CodeQL tem o próprio agendamento semanal e
-# a própria permissão (`security-events: write`), e misturá-lo ao pipeline
-# obrigaria o ci.yml inteiro a carregar essa permissão.
+# Kept separate from ci.yml on purpose: CodeQL has its own weekly schedule and
+# its own permission (`security-events: write`), and folding it into the pipeline
+# would force the whole of ci.yml to carry that permission.
 name: CodeQL
 
 on:
@@ -12,9 +12,9 @@ on:
   push:
     branches: [development, main]
   schedule:
-    # Segunda-feira, 04:12 UTC. O agendamento é o que pega vulnerabilidade nova
-    # em código antigo: uma query publicada depois do merge nunca rodaria contra
-    # um arquivo que ninguém mais toca.
+    # Monday, 04:12 UTC. The schedule is what catches a new vulnerability in old
+    # code: a query published after the merge would never run against a file
+    # nobody touches any more.
     - cron: '12 4 * * 1'
 
 permissions:
@@ -38,15 +38,15 @@ jobs:
 
       - uses: github/codeql-action/init@v4
         with:
-          # Uma única linguagem: o repositório é TypeScript de ponta a ponta.
-          # `javascript-typescript` cobre as duas — não existe um `typescript`
-          # separado.
+          # A single language: the repository is TypeScript end to end.
+          # `javascript-typescript` covers both — there is no separate
+          # `typescript`.
           languages: javascript-typescript
           queries: security-and-quality
 
-      # Sem passo de build: o CodeQL analisa JavaScript/TypeScript direto do
-      # código-fonte. Compilar seria trabalho jogado fora, e `src/generated/`
-      # (gitignored) nem chega ao checkout.
+      # No build step: CodeQL analyses JavaScript/TypeScript straight from
+      # source. Compiling would be wasted work, and `src/generated/`
+      # (gitignored) never reaches the checkout at all.
       - uses: github/codeql-action/analyze@v4
         with:
           category: '/language:javascript-typescript'
