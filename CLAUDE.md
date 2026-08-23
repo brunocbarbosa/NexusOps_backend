@@ -28,11 +28,16 @@ Other documents, by purpose:
 | `documents/important/`                       | the deep references below — kept together so they stay findable |
 
 `documents/important/` holds the deep references that the sections below point at rather than
-inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on
-— read it before editing `src/tenancy/`), `USERS.md` (everything auth and users rests on that was
-measured rather than read — read it before editing `src/auth/`, `src/users/`, or a DTO in any
-module) and `RLS_NOTES.md` (Row-Level Security, which is **not implemented yet**). They live
-together so that detail nobody needs today does not get lost.
+inline: `TENANCY_EXTENSION.md` (the tenancy layer, in two parts: the contract a
+feature is written against — the API, what the extension does to each operation, and the checklist
+for adding a model — and the measured Prisma 7.9.1 behaviour it depends on; read it before editing
+`src/tenancy/` or adding a tenant-scoped model), `USERS.md` (the auth and users reference, in two parts:
+the API contract a client integrates against — data model, every endpoint, every payload, every
+error — and the measured behaviour behind it; read it before editing `src/auth/`, `src/users/`, or
+a DTO in any module, and hand Part I to whoever writes the frontend) and `RLS_NOTES.md` (Row-Level
+Security, **not implemented yet**: the four steps that remain and how to check whether it is
+actually enforcing anything, plus the two traps measured here). They live together so that detail nobody needs today
+does not get lost.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
 > starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
@@ -236,15 +241,18 @@ everywhere in the codebase:
 
 The extension's measured behaviour against Prisma 7.9.1 — five findings the design depends on,
 including why nested access cannot be intercepted and why that hole is closed in the schema instead
-— is in **`documents/important/TENANCY_EXTENSION.md`**. Read it before editing anything in
-`src/tenancy/`, and re-check it after a Prisma upgrade.
+— is in **`documents/important/TENANCY_EXTENSION.md`**, Part II. Read it before editing anything in
+`src/tenancy/`, and re-check it after a Prisma upgrade. Part I of the same file is what a feature
+is written against: the exported API, how each Prisma operation is treated, and the four schema
+requirements a new tenant-scoped model has to meet — read that one before adding a model.
 
 **RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
 the code today. Two things will bite whoever writes it, both measured here rather than read in
 documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
 currently connects as one; and setting the tenant outside an interactive `$transaction` lands on a
 different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
-The measurements and the remaining work are in **`documents/important/RLS_NOTES.md`**.
+The measurements, the four steps that remain and the queries that tell you whether the layer is
+enforcing anything are in **`documents/important/RLS_NOTES.md`**.
 
 **Authentication, and the request-scoped tenant.** `src/auth/` is what turns the tenancy layer
 from measured code into code that runs on every request. `TenantContextInterceptor` (registered in
@@ -262,8 +270,10 @@ Everything that decision rests on and that was measured rather than read — why
 `tenantDomain`, the three places that legitimately use `runWithoutTenant()`, the transaction that
 changes tenant scope halfway through, why refresh tokens need their own signing key, why bcrypt's
 72-byte truncation is a correctness constraint, and why `Boolean('false')` is `true` in a query
-string — is in **`documents/important/USERS.md`**. Read it before editing `src/auth/`,
-`src/users/`, or a DTO in any module.
+string — is in **`documents/important/USERS.md`**, Part II. Read it before editing `src/auth/`,
+`src/users/`, or a DTO in any module. Part I of the same file is the API contract — the three
+tables, all twelve endpoints with their real request and response payloads, and the full error
+catalogue — and is what a client integrates against without reading the source.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
