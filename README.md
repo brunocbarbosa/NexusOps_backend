@@ -44,16 +44,18 @@ That principle is what the code below is actually about.
 
 This is an in-progress portfolio project, and the README says exactly where it stands.
 
-| Area                                   | Status         | Notes                                                                        |
-| -------------------------------------- | -------------- | ---------------------------------------------------------------------------- |
-| Tenant isolation (`src/tenancy/`)      | ✅ Implemented | Prisma Client Extension + `AsyncLocalStorage`, covered by 19 isolation tests |
-| Data model & migrations                | ✅ Implemented | 5 models, composite foreign keys, tenant-leading indexes                     |
-| Three-tier test infrastructure         | ✅ Implemented | unit / integration / e2e, with an ephemeral Postgres + Redis stack           |
-| CI/CD pipeline                         | ✅ Implemented | 7 jobs, branch rulesets, CodeQL, SonarCloud gate, GHCR image                 |
-| Production Docker image                | ✅ Implemented | Multi-stage, non-root, pruned 778 MB → 406 MB, smoke-tested against a DB     |
-| Row-Level Security (defense in depth)  | 🔬 Researched  | Behaviour measured and documented; policies and app role not written yet     |
-| Auth (JWT + RBAC), domain modules      | 🚧 Planned     | Dependencies wired; `src/` beyond tenancy is still the NestJS scaffold       |
-| Audit trail, BullMQ queues, WebSockets | 🚧 Planned     | Designed and modelled in the schema; modules not written yet                 |
+| Area                                   | Status         | Notes                                                                          |
+| -------------------------------------- | -------------- | ------------------------------------------------------------------------------ |
+| Tenant isolation (`src/tenancy/`)      | ✅ Implemented | Prisma Client Extension + `AsyncLocalStorage`, covered by 19 isolation tests   |
+| Data model & migrations                | ✅ Implemented | 6 models, composite foreign keys, tenant-leading indexes                       |
+| Three-tier test infrastructure         | ✅ Implemented | unit / integration / e2e, with an ephemeral Postgres + Redis stack             |
+| CI/CD pipeline                         | ✅ Implemented | 7 jobs, branch rulesets, CodeQL, SonarCloud gate, GHCR image                   |
+| Production Docker image                | ✅ Implemented | Multi-stage, non-root, pruned 778 MB → 406 MB, smoke-tested against a DB       |
+| Row-Level Security (defense in depth)  | 🔬 Researched  | Behaviour measured and documented; policies and app role not written yet       |
+| Auth (JWT + RBAC)                      | ✅ Implemented | Global `JwtAuthGuard` + `RolesGuard`; refresh tokens signed with their own key |
+| Users module (`src/users/`)            | ✅ Implemented | The first vertical on the tenancy layer: CRUD, RBAC, cross-tenant id gives 404 |
+| Ticket and comment modules             | 🚧 Planned     | Modelled in the schema; no domain module beyond users is written yet           |
+| Audit trail, BullMQ queues, WebSockets | 🚧 Planned     | Designed and modelled in the schema; modules not written yet                   |
 
 ---
 
