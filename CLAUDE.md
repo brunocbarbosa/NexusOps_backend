@@ -29,10 +29,12 @@ Other documents, by purpose:
 
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the measured Prisma 7.9.1 behaviour the tenant extension depends on
-— read it before editing `src/tenancy/`), `USERS.md` (everything auth and users rests on that was
-measured rather than read — read it before editing `src/auth/`, `src/users/`, or a DTO in any
-module) and `RLS_NOTES.md` (Row-Level Security, which is **not implemented yet**). They live
-together so that detail nobody needs today does not get lost.
+— read it before editing `src/tenancy/`), `USERS.md` (the auth and users reference, in two parts:
+the API contract a client integrates against — data model, every endpoint, every payload, every
+error — and the measured behaviour behind it; read it before editing `src/auth/`, `src/users/`, or
+a DTO in any module, and hand Part I to whoever writes the frontend) and `RLS_NOTES.md` (Row-Level
+Security, which is **not implemented yet**). They live together so that detail nobody needs today
+does not get lost.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
 > starts on a feature branch and lands through a pull request — see "CI and branch flow" below.
@@ -262,8 +264,10 @@ Everything that decision rests on and that was measured rather than read — why
 `tenantDomain`, the three places that legitimately use `runWithoutTenant()`, the transaction that
 changes tenant scope halfway through, why refresh tokens need their own signing key, why bcrypt's
 72-byte truncation is a correctness constraint, and why `Boolean('false')` is `true` in a query
-string — is in **`documents/important/USERS.md`**. Read it before editing `src/auth/`,
-`src/users/`, or a DTO in any module.
+string — is in **`documents/important/USERS.md`**, Part II. Read it before editing `src/auth/`,
+`src/users/`, or a DTO in any module. Part I of the same file is the API contract — the three
+tables, all twelve endpoints with their real request and response payloads, and the full error
+catalogue — and is what a client integrates against without reading the source.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
