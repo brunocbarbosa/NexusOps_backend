@@ -38,7 +38,7 @@ Everything a feature needs, from `src/tenancy/tenant-context.ts` and
 | --------------------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
 | `requireTenantId()`         | `(): string`                                  | you need the current tenant id; throws when there is none                 |
 | `runWithTenant(id, fn)`     | `(string, () => T \| Promise<T>): Promise<T>` | you are outside a request — a worker, a socket handler, a test            |
-| `runWithoutTenant(fn)`      | `(() => T \| Promise<T>): Promise<T>`         | a read genuinely must not be scoped; today only the login path            |
+| `runWithoutTenant(fn)`      | `(() => T \| Promise<T>): Promise<T>`         | a read genuinely must not be scoped: login, and the platform's own routes |
 | `tenantScoped(data)`        | `<T>(T): T & { tenantId: string }`            | wrapping the `data` of a top-level `create`                               |
 | `currentScope()`            | `(): TenantScope`                             | the extension's own branching; application code wants `requireTenantId()` |
 | `TenantContextMissingError` | error class                                   | catching or asserting the absence of a scope                              |
@@ -48,8 +48,10 @@ Everything a feature needs, from `src/tenancy/tenant-context.ts` and
 
 `runWithoutTenant()` is deliberately explicit and greppable: `grep -rn runWithoutTenant src/` is a
 complete audit of every unscoped read in the codebase. Keep that list short enough to read. There
-are three today, and they are enumerated in
-[`USERS.md`](./USERS.md#the-tenant-before-a-tenant-exists).
+are three callers today, and they are enumerated in
+[`USERS.md`](./USERS.md#the-tenant-before-a-tenant-exists): the login path, `CompaniesService` —
+where every query is unscoped, because the platform operator is asking about _every_ company — and
+`PlatformBootstrapService`, which creates the platform tenant at boot with no request at all.
 
 ### Where the scope comes from
 
@@ -140,6 +142,11 @@ here breaks loudly rather than silently.
 rewritten to `where.id = <current tenant>` — so `tenant.findMany()` returns _your_ tenant, not
 every tenant. Reading across tenants requires `runWithoutTenant()` explicitly, and having no
 context at all is refused like anywhere else.
+
+This is exactly what `src/platform/` runs into. The `ADMIN_MASTER`'s request carries the platform
+tenant's scope like any other request, so `GET /platform/companies` without `runWithoutTenant()`
+would list the platform row and nothing else. See
+[`PLATFORM.md`](./PLATFORM.md#every-company-query-runs-unscoped-and-it-has-to-say-so).
 
 ### `tenantScoped()`, and why a create needs it at all
 

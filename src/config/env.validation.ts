@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsEmail,
   IsEnum,
   IsInt,
   IsString,
@@ -9,6 +10,7 @@ import {
   MinLength,
   validateSync,
 } from 'class-validator';
+import { BCRYPT_MAX_BYTES, MaxBytes } from '../auth/password.constraints';
 
 /**
  * The environment this process is running as. An enum rather than a free string
@@ -21,8 +23,9 @@ export enum NodeEnv {
   Production = 'production',
 }
 
-/** The placeholder shipped in `.env.example`. Refused in production. */
+/** The placeholders shipped in `.env.example`. Refused in production. */
 const PLACEHOLDER_JWT_SECRET = 'change-me-in-every-environment';
+const PLACEHOLDER_ADMIN_MASTER_PASSWORD = 'change-me-before-any-deployment';
 
 /**
  * `15m`, `7d`, `3600s` — the duration grammar `@nestjs/jwt` accepts. Validated
@@ -84,6 +87,21 @@ export class EnvironmentVariables {
   @Min(4)
   @Max(31)
   BCRYPT_SALT_ROUNDS: number;
+
+  // The single platform operator. Seeded into the reserved platform tenant at
+  // boot by PlatformBootstrapService, which is why these are required rather
+  // than optional: an application that starts with nobody able to create a
+  // company has started into a state with no way out of itself.
+  @IsEmail()
+  ADMIN_MASTER_EMAIL: string;
+
+  // The same policy the API enforces on any password, including bcrypt's 72-byte
+  // truncation — a longer one here would be silently cut, and the operator would
+  // be typing a password whose tail never mattered.
+  @IsString()
+  @MinLength(8)
+  @MaxBytes(BCRYPT_MAX_BYTES)
+  ADMIN_MASTER_PASSWORD: string;
 }
 
 /**
@@ -126,6 +144,16 @@ export function validateEnv(
             'Generate a real one with `openssl rand -base64 48`',
         );
       }
+    }
+
+    // The account this one guards can create companies and users at any level,
+    // so shipping the published placeholder is worse than a weak password: it
+    // is a known one.
+    if (validated.ADMIN_MASTER_PASSWORD === PLACEHOLDER_ADMIN_MASTER_PASSWORD) {
+      problems.push(
+        '  - ADMIN_MASTER_PASSWORD: still the .env.example placeholder, which is ' +
+          'public, and it guards the account that creates every company',
+      );
     }
   }
 

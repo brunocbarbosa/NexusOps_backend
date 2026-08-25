@@ -20,20 +20,44 @@ have no request context — are in `CLAUDE.md` under "Architecture".
 
 ### Roles
 
-Three, on `User.role`, and they are hierarchical only by convention: the code checks membership in
-a list, never an ordering.
+Four on `User.role`, and they are **not** hierarchical, not even by convention: the code checks
+membership in a list, never an ordering.
 
-| Role        | Means                                      |
-| ----------- | ------------------------------------------ |
-| `ADMIN`     | administers the tenant: manages every user |
-| `AGENT`     | works tickets; may list users              |
-| `REQUESTER` | opens tickets; the default for a new user  |
+| Role           | Means                                                                             |
+| -------------- | --------------------------------------------------------------------------------- |
+| `ADMIN_MASTER` | the platform operator. Exactly one exists, and it is not part of a tenant's staff |
+| `ADMIN`        | administers the tenant: manages every user                                        |
+| `AGENT`        | works tickets; may list users                                                     |
+| `REQUESTER`    | opens tickets; the default for a new user                                         |
 
 `REQUESTER` is the schema default, and deliberately the least privileged: adding a user without
 saying a role cannot accidentally grant more than intended.
 
-The first `ADMIN` of a tenant is created by `POST /auth/register`, together with the tenant itself.
-There is no other way to bootstrap one.
+**`ADMIN_MASTER` is not assignable through this API.** No route accepts it — `ASSIGNABLE_ROLES` in
+`src/users/assignable-role.ts` is what `POST /users`, `PATCH /users/:id` and `GET /users?role=`
+validate against, and it holds the other three. Asking for it is a `400`:
+
+```json
+{
+  "message": [
+    "role must be one of the following values: ADMIN, AGENT, REQUESTER"
+  ],
+  "error": "Bad Request",
+  "statusCode": 400
+}
+```
+
+That is a security boundary and not a formality: the role belongs to the platform, so a tenant's own
+`ADMIN` being able to grant it would be an escalation straight out of the tenant. A partial unique
+index in PostgreSQL is the second layer. See [`PLATFORM.md`](./PLATFORM.md).
+
+Nor does `ADMIN_MASTER` reach the routes below. It gets `403` on all of `/users`; it manages a
+company's users through `/platform/companies/:companyId/users`, which runs this very same service
+inside that company's scope.
+
+The first `ADMIN` of a tenant is created together with the tenant itself, by the platform operator
+at `POST /platform/companies`. There is no other way to bootstrap one, and there is no self-service
+sign-up.
 
 ### The data model
 
@@ -88,10 +112,9 @@ refresh rotates, and a reused token ends every session.
 route prefix** — paths are `/auth/login`, not `/api/auth/login`. If a prefix is ever added it goes
 in `configureApp()` in `src/app.setup.ts`, and it will move every path in this document at once.
 
-**Authentication.** `Authorization: Bearer <accessToken>` on every route except the four public
+**Authentication.** `Authorization: Bearer <accessToken>` on every route except the three public
 ones. `JwtAuthGuard` is global, so a route is protected unless it explicitly says otherwise — the
-public ones are `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh` and the liveness
-`GET /`.
+public ones are `POST /auth/login`, `POST /auth/refresh` and the liveness `GET /`.
 
 **Content type.** `application/json` on every request with a body.
 
@@ -135,7 +158,6 @@ bearer token returns `{"message":"Unauthorized","statusCode":401}` with **no** `
 
 | Method   | Path                 | Auth        | Success | Purpose                               |
 | -------- | -------------------- | ----------- | ------- | ------------------------------------- |
-| `POST`   | `/auth/register`     | public      | 201     | create a tenant and its first ADMIN   |
 | `POST`   | `/auth/login`        | public      | 200     | exchange credentials for a token pair |
 | `POST`   | `/auth/refresh`      | public      | 200     | rotate the token pair                 |
 | `POST`   | `/auth/logout`       | any         | 204     | end one session                       |
@@ -155,37 +177,29 @@ Two response shapes recur, and it is worth naming them:
 ```ts
 // UserResponse — every route that returns a user returns exactly this.
 // Built as an allowlist, so a new column stays out of the API until someone decides otherwise.
-{ id: string, email: string, role: 'ADMIN'|'AGENT'|'REQUESTER', createdAt: string, deletedAt: string|null }
+// `role` can read 'ADMIN_MASTER' on GET /auth/me for the platform operator; no route below ever
+// returns one, because the operator is not a member of any company's staff.
+{ id: string, email: string, role: 'ADMIN_MASTER'|'ADMIN'|'AGENT'|'REQUESTER', createdAt: string, deletedAt: string|null }
 
 // AuthResult — every route that issues tokens returns exactly this.
 { accessToken: string, refreshToken: string, user: UserResponse }
 ```
 
-### `POST /auth/register` — public
+### `POST /auth/register` — **removed**
 
-Creates a tenant and its first `ADMIN` in one transaction. The only way either comes into
-existence.
+It answers `404`, and it answers `404` with a valid bearer token too: the route is gone, not locked
+down.
 
 ```json
 {
-  "tenantName": "Acme Inc",
-  "tenantDomain": "acme.com",
-  "email": "admin@acme.com",
-  "password": "correct horse battery"
+  "message": "Cannot POST /auth/register",
+  "error": "Not Found",
+  "statusCode": 404
 }
 ```
 
-| Field          | Rules                                                                          |
-| -------------- | ------------------------------------------------------------------------------ |
-| `tenantName`   | string, 2–255 chars, trimmed                                                   |
-| `tenantDomain` | string, 3–100 chars, hostname shape (`acme` or `acme.com`), lowercased, unique |
-| `email`        | valid email, 3–255 chars, lowercased                                           |
-| `password`     | string, min 8 chars, **max 72 bytes**                                          |
-
-**201** → `AuthResult`. **409** if the domain is taken. **400** on any validation failure.
-
-The 72-byte ceiling is not arbitrary and is not a character count: bcrypt silently ignores
-everything past byte 72, and one emoji costs four bytes. See Part II.
+A company no longer signs itself up. The platform operator creates it, together with its first
+`ADMIN`, at `POST /platform/companies` — payloads and rules in [`PLATFORM.md`](./PLATFORM.md).
 
 ### `POST /auth/login` — public
 
@@ -421,7 +435,7 @@ belongs in them, and the client should treat `role` there as a hint rather than 
 The flow a client implements:
 
 ```
-register / login  ──► { accessToken, refreshToken, user }
+login             ──► { accessToken, refreshToken, user }
                           │
      every request ───────┤ Authorization: Bearer <accessToken>
                           │
@@ -447,7 +461,8 @@ Real today, and a client will hit them:
 - **No rate limiting on `POST /auth/login`.** Nothing throttles credential guessing yet.
 - **No password reset and no email invitation.** An ADMIN sets the initial password directly, and a
   forgotten password has no self-service path. Both wait on email delivery, which the project does
-  not have.
+  not have. This now includes the platform operator: its only recovery path is editing
+  `ADMIN_MASTER_PASSWORD` in the environment and restarting.
 - **No OpenAPI/Swagger document.** This file is the contract; there is no generated spec to point a
   client generator at.
 
@@ -467,15 +482,18 @@ This is the _why_ behind Part I.
 ### The tenant before a tenant exists
 
 `User.email` is only unique within a tenant, so an email address alone is ambiguous across
-companies. Login carries `tenantDomain` in the body and resolves the `Tenant` first. There are
-**three** places in the whole codebase that run without a tenant, and the list is deliberately
-short — a single `grep runWithoutTenant` audits the entire surface:
+companies. Login carries `tenantDomain` in the body and resolves the `Tenant` first. **Three modules
+in `src/`** run without a tenant, plus the test cleanup, and the list is deliberately short — a
+single `grep -rn runWithoutTenant src/` audits the entire surface. (`CompaniesService` accounts for
+five of the call sites, because every one of its queries needs it; it is still one place to reason
+about.)
 
-| Where                  | Why                                                |
-| ---------------------- | -------------------------------------------------- |
-| `AuthService.register` | the `Tenant` is being created                      |
-| `AuthService.login`    | the `Tenant` has not been identified yet           |
-| test suite cleanup     | deleting "from every tenant" is exactly the intent |
+| Where                            | Why                                                                  |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `AuthService.login`              | the `Tenant` has not been identified yet                             |
+| `CompaniesService` (every query) | `Tenant` is agnostic, and the operator is asking about _all_ of them |
+| `PlatformBootstrapService`       | the platform `Tenant` is being created, at boot, with no request     |
+| test suite cleanup               | deleting "from every tenant" is exactly the intent                   |
 
 `AuthService.refresh` is **not** on the list, and that is the reason `tenantId` travels inside the
 refresh token: a refresh happens precisely when the access token has expired, so there is no
@@ -485,9 +503,10 @@ the scope before the first query instead of leaving that lookup unscoped.
 
 ### A `$transaction` that changes scope halfway through
 
-`register()` creates the `Tenant` under `runWithoutTenant()` and the first `ADMIN` under
-`runWithTenant(tenant.id)`, **inside the same transaction** — splitting them would leave a company
-existing with nobody able to log into it.
+`CompaniesService.create()` creates the `Tenant` under `runWithoutTenant()` and the first `ADMIN`
+under `runWithTenant(tenant.id)`, **inside the same transaction** — splitting them would leave a
+company existing with nobody able to log into it. (This was `AuthService.register()` until company
+creation became the platform operator's job; the transaction moved unchanged.)
 
 Two properties of Prisma 7.9.1 hold that together, and both were measured:
 

@@ -7,6 +7,8 @@ import { PRISMA } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import { runWithoutTenant } from '../../src/tenancy/tenant-context';
 import { createTestApp } from '../utils/create-test-app';
+import { createCompany, loginAsAdminMaster } from '../utils/platform-session';
+import type { AuthBody as OperatorSession } from '../utils/platform-session';
 import { bodyOf } from '../utils/response-body';
 
 type AuthBody = {
@@ -21,6 +23,8 @@ describe('Auth (e2e)', () => {
 
   const run = randomUUID().slice(0, 8);
   const domains: string[] = [];
+  let operator: OperatorSession;
+
   const registration = (label: string) => {
     const tenantDomain = `${label}-${run}.example`;
     domains.push(tenantDomain);
@@ -32,11 +36,26 @@ describe('Auth (e2e)', () => {
     };
   };
 
+  /**
+   * What `POST /auth/register` used to do, done the way it happens now: the
+   * ADMIN_MASTER creates the company and its first ADMIN. Every describe below
+   * needs an existing company to log into, and none of them is about how the
+   * company got there.
+   */
+  const seed = (payload: ReturnType<typeof registration>) =>
+    createCompany(app, operator, {
+      name: payload.tenantName,
+      domain: payload.tenantDomain,
+      email: payload.email,
+      password: payload.password,
+    });
+
   const http = () => request(app.getHttpServer());
 
   beforeAll(async () => {
     app = (await createTestApp()) as INestApplication<App>;
     prisma = app.get<ExtendedPrismaClient>(PRISMA);
+    operator = await loginAsAdminMaster(app);
   });
 
   afterAll(async () => {
@@ -46,55 +65,29 @@ describe('Auth (e2e)', () => {
     await app.close();
   });
 
+  /**
+   * The route is gone, not merely locked down.
+   *
+   * A company does not sign itself up any more: the ADMIN_MASTER creates it at
+   * `POST /platform/companies`, together with its first ADMIN. This is asserted
+   * rather than assumed because a frontend still calling it needs 404 — the
+   * honest "there is no such route" — and not a 401 that reads as "log in
+   * first".
+   */
   describe('POST /auth/register', () => {
-    it('creates a tenant with its first ADMIN', async () => {
-      const payload = registration('signup');
-
-      const response = await http()
-        .post('/auth/register')
-        .send(payload)
-        .expect(201);
-
-      const body = bodyOf<AuthBody>(response);
-      expect(body.accessToken).toEqual(expect.any(String));
-      expect(body.refreshToken).toEqual(expect.any(String));
-      expect(body.user).toMatchObject({
-        email: payload.email,
-        role: UserRole.ADMIN,
-        deletedAt: null,
-      });
-      // The one field that must never appear in a response body.
-      expect(body.user).not.toHaveProperty('passwordHash');
-    });
-
-    it('refuses a domain that is already registered', async () => {
-      const payload = registration('taken');
-      await http().post('/auth/register').send(payload).expect(201);
-
-      await http().post('/auth/register').send(payload).expect(409);
-    });
-
-    it.each([
-      ['a malformed e-mail', { email: 'not-an-email' }],
-      ['a password below the minimum', { password: 'short' }],
-      // bcrypt hashes at most 72 bytes and silently drops the rest, so anything
-      // longer is not really part of the credential.
-      ['a password past bcrypt 72-byte limit', { password: 'a'.repeat(73) }],
-      ['a domain that is not a hostname', { tenantDomain: 'not a domain!' }],
-    ])('rejects %s with 400', async (_label, override) => {
+    it('does not exist', async () => {
       await http()
         .post('/auth/register')
-        .send({ ...registration('invalid'), ...override })
-        .expect(400);
+        .send(registration('gone'))
+        .expect(404);
     });
 
-    // forbidNonWhitelisted in the global ValidationPipe. Without it, an extra
-    // field travels into a Prisma `data` object.
-    it('rejects an unexpected field with 400', async () => {
+    it('is not merely hidden behind authentication', async () => {
       await http()
         .post('/auth/register')
-        .send({ ...registration('extra'), role: UserRole.ADMIN })
-        .expect(400);
+        .set('Authorization', `Bearer ${operator.accessToken}`)
+        .send(registration('gone-authenticated'))
+        .expect(404);
     });
   });
 
@@ -102,7 +95,7 @@ describe('Auth (e2e)', () => {
     const payload = registration('login');
 
     beforeAll(async () => {
-      await http().post('/auth/register').send(payload).expect(201);
+      await seed(payload);
     });
 
     it('returns 200 and a token', async () => {
@@ -160,10 +153,15 @@ describe('Auth (e2e)', () => {
     let accessToken: string;
 
     beforeAll(async () => {
+      await seed(payload);
       const response = await http()
-        .post('/auth/register')
-        .send(payload)
-        .expect(201);
+        .post('/auth/login')
+        .send({
+          tenantDomain: payload.tenantDomain,
+          email: payload.email,
+          password: payload.password,
+        })
+        .expect(200);
       accessToken = bodyOf<AuthBody>(response).accessToken;
     });
 
@@ -233,7 +231,7 @@ describe('Auth (e2e)', () => {
     };
 
     beforeAll(async () => {
-      await http().post('/auth/register').send(payload).expect(201);
+      await seed(payload);
     });
 
     it('exchanges a refresh token for a working new pair', async () => {
@@ -332,7 +330,7 @@ describe('Auth (e2e)', () => {
     const payload = registration('logout');
 
     beforeAll(async () => {
-      await http().post('/auth/register').send(payload).expect(201);
+      await seed(payload);
     });
 
     const freshSession = async () =>

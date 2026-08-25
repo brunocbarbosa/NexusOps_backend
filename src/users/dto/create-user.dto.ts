@@ -1,14 +1,15 @@
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
-  IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   Length,
   MinLength,
 } from 'class-validator';
 import { BCRYPT_MAX_BYTES, MaxBytes } from '../../auth/password.constraints';
-import { UserRole } from '../../generated/prisma/enums';
+import { ASSIGNABLE_ROLES } from '../assignable-role';
+import type { AssignableRole } from '../assignable-role';
 
 const normalise = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().toLowerCase() : value;
@@ -31,7 +32,11 @@ export class CreateUserDto {
 
   // Optional so that the common case — adding a requester — needs no thought.
   // The schema default is REQUESTER, which is also the least privileged.
+  //
+  // @IsIn(ASSIGNABLE_ROLES) and not @IsEnum(UserRole): the enum now carries
+  // ADMIN_MASTER, and accepting it here would let a company's ADMIN mint a
+  // platform operator. See src/users/assignable-role.ts.
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsIn(ASSIGNABLE_ROLES)
+  role?: AssignableRole;
 }

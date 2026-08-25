@@ -56,6 +56,10 @@ describe('QueryUsersDto through the global ValidationPipe', () => {
     ['a perPage above the cap', { perPage: '101' }],
     ['a perPage below 1', { perPage: '0' }],
     ['a role that is not one', { role: 'WIZARD' }],
+    // Not merely "an invalid value": ADMIN_MASTER is a real member of the enum,
+    // and filtering by it would otherwise answer "no such users" to a question
+    // the caller is not allowed to ask.
+    ['the platform role', { role: 'ADMIN_MASTER' }],
   ])('rejects %s', async (_label, query) => {
     await expect(parse(query)).rejects.toThrow();
   });

@@ -1,6 +1,6 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, User } from '../generated/prisma/client';
+import { User } from '../generated/prisma/client';
 import { UserRole } from '../generated/prisma/enums';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { currentScope } from '../tenancy/tenant-context';
@@ -203,48 +203,6 @@ describe('AuthService', () => {
       await expect(service.login(credentials)).rejects.toThrow(
         new UnauthorizedException('Invalid credentials'),
       );
-    });
-  });
-
-  describe('register', () => {
-    it('hashes the password before opening the transaction', async () => {
-      const order: string[] = [];
-      hashing.hash.mockImplementation(() => {
-        order.push('hash');
-        return Promise.resolve('fresh-hash');
-      });
-      prisma.$transaction.mockImplementation(() => {
-        order.push('transaction');
-        return Promise.resolve(user);
-      });
-
-      await service.register({ ...credentials, tenantName: 'Acme' });
-
-      // bcrypt at production cost takes hundreds of milliseconds; doing it
-      // inside the transaction holds a pooled connection open for all of it.
-      expect(order).toEqual(['hash', 'transaction']);
-    });
-
-    it('turns a duplicate domain into 409 rather than a Prisma error', async () => {
-      prisma.$transaction.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('duplicate', {
-          code: 'P2002',
-          clientVersion: '7.9.1',
-        }),
-      );
-
-      await expect(
-        service.register({ ...credentials, tenantName: 'Acme' }),
-      ).rejects.toThrow(ConflictException);
-    });
-
-    it('lets any other database error through untranslated', async () => {
-      const boom = new Error('connection reset');
-      prisma.$transaction.mockRejectedValue(boom);
-
-      await expect(
-        service.register({ ...credentials, tenantName: 'Acme' }),
-      ).rejects.toBe(boom);
     });
   });
 

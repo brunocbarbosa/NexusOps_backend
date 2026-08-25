@@ -12,18 +12,15 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { RegisterDto } from './dto/register.dto';
 
+/**
+ * There is no `POST /auth/register`. A company does not sign itself up: it is
+ * created by the platform operator at `POST /platform/companies`, together with
+ * its first ADMIN. Everything here is about a company that already exists.
+ */
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
-
-  /** The only way a tenant, and therefore the first ADMIN, comes into existence. */
-  @Public()
-  @Post('register')
-  register(@Body() dto: RegisterDto): Promise<AuthResult> {
-    return this.auth.register(dto);
-  }
 
   // 200 and not the default 201: logging in creates no resource, and a client
   // that branches on the status should not have to special-case this one.
