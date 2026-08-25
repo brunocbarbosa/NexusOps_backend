@@ -289,13 +289,34 @@ to exist: Prisma connects on the first query, and none happens here."_ Um seeder
 `OnModuleInit` desfaz essa premissa — o container roda em bridge e `DATABASE_URL` aponta para
 `localhost:5433`, que lá dentro é o próprio container.
 
-- [ ] `.github/workflows/ci.yml`, job `docker`: `-p 3000:3000` → `--network host` (o banco já
+- [x] `.github/workflows/ci.yml`, job `docker`: `-p 3000:3000` → `--network host` (o banco já
       existe, o passo anterior roda `npm run test:setup`; só não era alcançável)
-- [ ] `-e ADMIN_MASTER_EMAIL` e `-e ADMIN_MASTER_PASSWORD` acrescentados, do mesmo `.env.test`
-- [ ] Comentário do passo reescrito: ele deixa de ser "só um boot" e passa a exercitar o
+- [x] `-e ADMIN_MASTER_EMAIL` e `-e ADMIN_MASTER_PASSWORD` acrescentados, do mesmo `.env.test`
+- [x] Comentário do passo reescrito: ele deixa de ser "só um boot" e passa a exercitar o
       bootstrap contra um banco real — cobertura melhor, não pior
-- [ ] Pipeline verde no PR
-- [ ] Commit + checkpoint
+- [x] `npm run format:check` verde e o YAML parseia
+
+O passo foi **reproduzido localmente**, não só editado. Imagem construída com `docker build`
+e rodada exatamente como a CI a roda:
+
+- [x] Com `--network host`: responde na 3000 e o log do próprio container mostra
+      `Created the ADMIN_MASTER (admin-master@nexusops.test)` — provado contra uma tabela que
+      tinha sido esvaziada segundos antes, não contra o log sozinho
+- [x] **Contrafactual medido**: com o `-p 3000:3000` antigo, a aplicação não responde dentro
+      dos 30s e o container morre. O passo da CI falharia — que é exatamente o motivo da
+      mudança, e agora está demonstrado em vez de afirmado
+- [x] A recusa do placeholder em produção verificada **dentro da imagem**, que carrega o
+      próprio `NODE_ENV=production`:
+      `Invalid environment (1 problem(s)): - ADMIN_MASTER_PASSWORD: still the .env.example
+  placeholder, which is public, and it guards the account that creates every company`
+- [x] `npm run test:all` verde — 120 / 52 / 59
+- [ ] Pipeline verde no PR (só verificável depois de abrir o PR)
+- [x] Commit + checkpoint
+
+**Um falso positivo que quase passou.** Na primeira tentativa o `curl` respondeu "OK após 1
+tentativa" — mas era um dev server esquecido na porta 3000, não o container, que tinha morrido
+com `EADDRINUSE`. A prova real não é o `curl`: é o log do container mais a linha reaparecendo
+no banco.
 
 ---
 
