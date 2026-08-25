@@ -482,9 +482,11 @@ This is the _why_ behind Part I.
 ### The tenant before a tenant exists
 
 `User.email` is only unique within a tenant, so an email address alone is ambiguous across
-companies. Login carries `tenantDomain` in the body and resolves the `Tenant` first. There are
-**three** places in the whole codebase that run without a tenant, and the list is deliberately
-short — a single `grep runWithoutTenant` audits the entire surface:
+companies. Login carries `tenantDomain` in the body and resolves the `Tenant` first. **Three modules
+in `src/`** run without a tenant, plus the test cleanup, and the list is deliberately short — a
+single `grep -rn runWithoutTenant src/` audits the entire surface. (`CompaniesService` accounts for
+five of the call sites, because every one of its queries needs it; it is still one place to reason
+about.)
 
 | Where                            | Why                                                                  |
 | -------------------------------- | -------------------------------------------------------------------- |
