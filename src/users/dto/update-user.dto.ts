@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsOptional, Length } from 'class-validator';
-import { UserRole } from '../../generated/prisma/enums';
+import { IsEmail, IsIn, IsOptional, Length } from 'class-validator';
+import { ASSIGNABLE_ROLES } from '../assignable-role';
+import type { AssignableRole } from '../assignable-role';
 
 const normalise = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().toLowerCase() : value;
@@ -20,7 +21,9 @@ export class UpdateUserDto {
   @Transform(normalise)
   email?: string;
 
+  // Never ADMIN_MASTER — promoting an existing user into the platform role is the
+  // same escalation as creating one. See src/users/assignable-role.ts.
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsIn(ASSIGNABLE_ROLES)
+  role?: AssignableRole;
 }

@@ -60,34 +60,44 @@ A camada de tenancy já oferece as duas primitivas necessárias, então quase n�
 
 ### Schema
 
-- [ ] `enum UserRole` ganha `ADMIN_MASTER` em `prisma/schema.prisma`
-- [ ] `model Tenant` ganha `isPlatform Boolean? @unique @map("is_platform")` — nullable de
+- [x] `enum UserRole` ganha `ADMIN_MASTER` em `prisma/schema.prisma`
+- [x] `model Tenant` ganha `isPlatform Boolean? @unique @map("is_platform")` — nullable de
       propósito: NULLs são distintos num índice único no Postgres, então "no máximo um `true`"
       sai de graça, é expressável no schema (sem drift) e a listagem vira `where: { isPlatform: null }`
-- [ ] Migration criada e aplicada
-- [ ] SQL cru na migration: `CREATE UNIQUE INDEX users_single_admin_master ON users ((true)) WHERE role = 'ADMIN_MASTER'`
+- [x] Migrations criadas e aplicadas — **duas**, e a separação é obrigatória:
+      `20260825125236_platform_admin_master` (enum + coluna) e
+      `20260825125237_admin_master_uniqueness` (o índice). O PostgreSQL recusa _usar_ um
+      valor de enum adicionado na mesma transação, e o Prisma roda cada arquivo numa
+      transação — o `ADD VALUE` e o índice que o referencia não cabem no mesmo arquivo
+- [x] SQL cru na migration: `CREATE UNIQUE INDEX users_single_admin_master ON users ((true)) WHERE role = 'ADMIN_MASTER'`
       — sem filtro por `deleted_at`: exatamente uma linha, sempre
-- [ ] Nota de drift registrada: índice parcial não é expressável em `schema.prisma`, então
+- [x] Nota de drift registrada: índice parcial não é expressável em `schema.prisma`, então
       `prisma migrate dev` vai propor um `DROP`. Fallback documentado (`isPlatformAdmin Boolean? @unique`)
-- [ ] `npm run prisma:generate` rodado
+- [x] `npm run prisma:generate` rodado
 
 ### A barreira de escalação
 
 O defeito a evitar: assim que `UserRole` ganha `ADMIN_MASTER`, o `@IsEnum(UserRole)` do
 `CreateUserDto` deixaria um `ADMIN` comum criar um `ADMIN_MASTER` dentro da própria company.
 
-- [ ] `src/users/assignable-role.ts` — `ASSIGNABLE_ROLES = [ADMIN, AGENT, REQUESTER]`
-- [ ] `CreateUserDto.role` usa `@IsIn(ASSIGNABLE_ROLES)`
-- [ ] `UpdateUserDto.role` usa `@IsIn(ASSIGNABLE_ROLES)`
-- [ ] `QueryUsersDto.role` usa `@IsIn(ASSIGNABLE_ROLES)`
-- [ ] Falha fechado no `ValidationPipe` (400), antes de qualquer service — o índice único é a
+- [x] `src/users/assignable-role.ts` — `ASSIGNABLE_ROLES = [ADMIN, AGENT, REQUESTER]`
+- [x] `CreateUserDto.role` usa `@IsIn(ASSIGNABLE_ROLES)` e tipa `AssignableRole`
+- [x] `UpdateUserDto.role` usa `@IsIn(ASSIGNABLE_ROLES)` e tipa `AssignableRole`
+- [x] `QueryUsersDto.role` usa `@IsIn(ASSIGNABLE_ROLES)` e tipa `AssignableRole`
+- [x] Falha fechado no `ValidationPipe` (400), antes de qualquer service — o índice único é a
       segunda camada, na mesma lógica das duas camadas de tenancy
 
 ### Verificação
 
-- [ ] `npm run typecheck` verde
-- [ ] `npm run test:unit` verde
-- [ ] Commit + checkpoint
+- [x] `npm run typecheck` verde
+- [x] `npm run test:unit` verde — 108 testes, 11 suítes
+- [x] `npx eslint "src/**/*.ts"` (read-only) e `npm run format:check` verdes
+- [x] Constraints verificadas **no banco**, não só no SQL aplicado: segundo platform tenant
+      recusado, segundo `ADMIN_MASTER` recusado, e duas companies com `is_platform` NULL ambas
+      aceitas — o truque de NULLs distintos confirmado
+- [x] Barreira de escalação **falsificada**: trocar `@IsIn(ASSIGNABLE_ROLES)` por
+      `@IsIn(Object.values(UserRole))` faz o teste falhar; restaurar faz passar
+- [x] Commit + checkpoint
 
 ---
 
@@ -226,7 +236,9 @@ to exist: Prisma connects on the first query, and none happens here."_ Um seeder
 - [ ] `platform-bootstrap.service.spec.ts` — mocks à mão dentro de `runWithTenant`/`runWithoutTenant`,
       no molde de `src/users/users.service.spec.ts`
 - [ ] DTOs novos passando pelo `VALIDATION_PIPE_OPTIONS` real, no molde de `query-users.dto.spec.ts`
-- [ ] **`role: 'ADMIN_MASTER'` recusado com 400** — o teste da barreira de escalação
+- [x] **`role: 'ADMIN_MASTER'` recusado com 400** — o teste da barreira de escalação.
+      Antecipado para a Fase 1: um guard que entra sem teste, junto com a superfície que ele
+      protege, é o que regride primeiro. `src/users/dto/user-role.dto.spec.ts`
 
 ### Integration
 
