@@ -156,53 +156,75 @@ O defeito a evitar: assim que `UserRole` ganha `ADMIN_MASTER`, o `@IsEnum(UserRo
 
 ### Companies
 
-- [ ] `src/platform/companies.service.ts` + `companies.controller.ts`, tudo sob
+- [x] `src/platform/companies.service.ts` + `companies.controller.ts`, tudo sob
       `@Roles(UserRole.ADMIN_MASTER)`
-- [ ] `POST /platform/companies` → 201. **Exige o primeiro ADMIN no mesmo payload**
+- [x] `POST /platform/companies` → 201. **Exige o primeiro ADMIN no mesmo payload**
       (`{ name, domain, admin: { email, password } }`): uma company sem `ADMIN` é uma em que
       `assertNotLastAdmin` nunca pode ser satisfeito e na qual ninguém entra. É a transação de
       `AuthService.register` **movida**, não reescrita
-- [ ] `GET /platform/companies` → 200, paginado, `where: { isPlatform: null }`
-- [ ] `GET /platform/companies/:id` → 200
-- [ ] `PATCH /platform/companies/:id` → 200 (`name`, `domain`, `isActive`)
-- [ ] `DELETE /platform/companies/:id` → 204, hard delete (cascade)
-- [ ] `CreateCompanyDto` herda o regex de hostname de `RegisterDto` e recusa explicitamente o
+- [x] `GET /platform/companies` → 200, paginado, `where: { isPlatform: null }`
+- [x] `GET /platform/companies/:id` → 200
+- [x] `PATCH /platform/companies/:id` → 200 (`name`, `domain`, `isActive`)
+- [x] `DELETE /platform/companies/:id` → 204, hard delete (cascade)
+- [x] `CreateCompanyDto` herda o regex de hostname de `RegisterDto` e recusa explicitamente o
       valor reservado `platform` com 400 (o `@unique` já daria 409, mas 400 é mais claro)
 
 ### Usuários de uma company
 
-- [ ] `src/platform/company-users.controller.ts` — casca fina: `runWithTenant(companyId, () => usersService.…)`
-- [ ] `POST /platform/companies/:id/users` → 201
-- [ ] `GET /platform/companies/:id/users` → 200, paginado
-- [ ] `GET /platform/companies/:id/users/:userId` → 200
-- [ ] `PATCH /platform/companies/:id/users/:userId` → 200
-- [ ] `DELETE /platform/companies/:id/users/:userId` → 204
-- [ ] `POST /platform/companies/:id/users/:userId/restore` → 200
+- [x] `src/platform/company-users.controller.ts` — casca fina: `runWithTenant(companyId, () => usersService.…)`
+- [x] `POST /platform/companies/:id/users` → 201
+- [x] `GET /platform/companies/:id/users` → 200, paginado
+- [x] `GET /platform/companies/:id/users/:userId` → 200
+- [x] `PATCH /platform/companies/:id/users/:userId` → 200
+- [x] `DELETE /platform/companies/:id/users/:userId` → 204
+- [x] `POST /platform/companies/:id/users/:userId/restore` → 200
 
 ### `loadCompany(id)` — o chokepoint das rotas aninhadas
 
-- [ ] Sob `runWithoutTenant()`, 404 se a company não existe — sem ele um UUID inexistente
+- [x] Sob `runWithoutTenant()`, 404 se a company não existe — sem ele um UUID inexistente
       devolveria lista vazia em vez de 404, porque `runWithTenant` aceita qualquer string
-- [ ] 404 também se o id é o **tenant de plataforma** — sem isso,
+- [x] 404 também se o id é o **tenant de plataforma** — sem isso,
       `/platform/companies/<platform-id>/users/<self>` deixaria o admin_master se apagar
 
 ### A mudança cirúrgica no `UsersService`
 
 Dois pontos comparam com `UserRole.ADMIN` e recusariam o admin_master agindo dentro de uma company.
 
-- [ ] `administersUsers(role)` — predicado nomeado (`ADMIN || ADMIN_MASTER`), em vez de um
+- [x] `administersUsers(role)` — predicado nomeado (`ADMIN || ADMIN_MASTER`), em vez de um
       `requester` sintético, que seria mentira
-- [ ] Aplicado no gate de `includeDeleted` em `findAll` (403)
-- [ ] Aplicado no gate de soft-deleted em `load()` (404)
-- [ ] `assertNotLastAdmin` **não muda**: conta `role: ADMIN` no escopo corrente, que é a company
+- [x] Aplicado no gate de `includeDeleted` em `findAll` (403)
+- [x] Aplicado no gate de soft-deleted em `load()` (404)
+- [x] `assertNotLastAdmin` **não muda**: conta `role: ADMIN` no escopo corrente, que é a company
       alvo — correto por construção
-- [ ] `RolesGuard` **não muda**: continua não-hierárquico (`includes()`, não ordenação)
+- [x] `RolesGuard` **não muda**: continua não-hierárquico (`includes()`, não ordenação)
 
 ### Verificação
 
-- [ ] `npm run typecheck` verde
-- [ ] `npm run test:unit` verde
-- [ ] Commit + checkpoint
+- [x] `npm run typecheck` verde
+- [x] `npm run test:all` verde — 112 unit, 50 integration, 52 e2e
+- [x] `npx eslint` (read-only) e `npm run format:check` verdes
+
+Exercitado contra o servidor rodando, com saída real:
+
+- [x] `POST /platform/companies` → 201 com `{ company, admin }` nas duas metades
+- [x] AGENT e REQUESTER criados dentro dela → 201; a listagem devolve os três papéis
+- [x] `GET /platform/companies` → o platform tenant **não** aparece
+- [x] ADMIN de uma company em `/platform/**` → **403** em GET, POST e nas rotas aninhadas
+- [x] `/platform/companies/<platform-id>` em GET, `/users` e DELETE → **404** nos três
+- [x] `domain: "platform"` → 400 `domain "platform" is reserved for the platform itself`
+- [x] `role: "ADMIN_MASTER"` pela rota de plataforma → 400 `role must be one of the
+  following values: ADMIN, AGENT, REQUESTER`
+- [x] UUID de company inexistente → **404**, não página vazia (é o `requireCompany`)
+- [x] Desativar → 204; lista sem `includeDeleted` 2, com `includeDeleted` 3 (é a mudança
+      do `administersUsers` — antes o ADMIN_MASTER levava 403 aqui); GET do desativado 200;
+      restore 200
+- [x] Usuário de outra company → **404** em GET e PATCH, nunca 403
+- [x] `DELETE` de company → 204 e os 3 usuários somem junto (cascade)
+- [x] Cascade **medido no banco** antes de escrever o delete: `audit_logs.user_id` e
+      `tickets.assignee_id` são `ON DELETE RESTRICT`, e ainda assim o cascade a partir do
+      `Tenant` passa — as linhas que referenciam o usuário são removidas pelo próprio
+      cascade de tenant dentro da mesma instrução, então não sobra nada para restringir
+- [x] Commit + checkpoint
 
 ---
 
