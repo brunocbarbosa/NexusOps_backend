@@ -308,7 +308,7 @@ e rodada exatamente como a CI a roda:
 - [x] A recusa do placeholder em produção verificada **dentro da imagem**, que carrega o
       próprio `NODE_ENV=production`:
       `Invalid environment (1 problem(s)): - ADMIN_MASTER_PASSWORD: still the .env.example
-  placeholder, which is public, and it guards the account that creates every company`
+placeholder, which is public, and it guards the account that creates every company`
 - [x] `npm run test:all` verde — 120 / 52 / 59
 - [ ] Pipeline verde no PR (só verificável depois de abrir o PR)
 - [x] Commit + checkpoint
@@ -324,9 +324,9 @@ no banco.
 
 ### Unit
 
-- [ ] `platform-bootstrap.service.spec.ts` — mocks à mão dentro de `runWithTenant`/`runWithoutTenant`,
+- [x] `platform-bootstrap.service.spec.ts` — mocks à mão dentro de `runWithTenant`/`runWithoutTenant`,
       no molde de `src/users/users.service.spec.ts`
-- [ ] DTOs novos passando pelo `VALIDATION_PIPE_OPTIONS` real, no molde de `query-users.dto.spec.ts`
+- [x] DTOs novos passando pelo `VALIDATION_PIPE_OPTIONS` real, no molde de `query-users.dto.spec.ts`
 - [x] **`role: 'ADMIN_MASTER'` recusado com 400** — o teste da barreira de escalação.
       Antecipado para a Fase 1: um guard que entra sem teste, junto com a superfície que ele
       protege, é o que regride primeiro. `src/users/dto/user-role.dto.spec.ts`
@@ -336,18 +336,20 @@ no banco.
 Semear com o cliente **sem** extensão, como `tenant-isolation.int-spec.ts` faz — "um fixture
 construído pela coisa sob teste não prova nada".
 
-- [ ] `platform-bootstrap.int-spec.ts` — idempotência em dois boots
-- [ ] A senha do `.env` re-hasheada no segundo boot
-- [ ] Um segundo `ADMIN_MASTER` inserido pelo cliente cru viola o índice único
-- [ ] Um segundo tenant com `isPlatform: true` viola o `@unique`
+- [x] `platform-bootstrap.int-spec.ts` — idempotência em dois boots (converge, não acumula)
+- [x] A senha do `.env` re-hasheada no segundo boot
+- [x] Um segundo `ADMIN_MASTER` inserido pelo cliente cru viola o índice único
+- [x] Um segundo tenant com `isPlatform: true` viola o `@unique`
 
 ### E2E
 
-- [ ] `platform.e2e-spec.ts` — admin_master cria company, cria usuários de cada nível, lista,
+Números: **128 unit, 59 integration, 76 e2e** (eram 120/52/59 no fim da Fase 4).
+
+- [x] `platform.e2e-spec.ts` — admin_master cria company, cria usuários de cada nível, lista,
       atualiza, desativa, restaura, apaga a company
-- [ ] Um `ADMIN` comum leva 403 em toda `/platform/**`
-- [ ] `/platform/companies/<platform-id>/users` dá 404
-- [ ] A company apagada some junto com seus usuários
+- [x] Um `ADMIN` comum leva 403 em toda `/platform/**`
+- [x] `/platform/companies/<platform-id>/users` dá 404
+- [x] A company apagada some junto com seus usuários
 
 ### Documentação
 
