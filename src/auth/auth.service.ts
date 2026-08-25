@@ -1,23 +1,15 @@
-import {
-  ConflictException,
-  Inject,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, User } from '../generated/prisma/client';
-import { UserRole } from '../generated/prisma/enums';
+import { User } from '../generated/prisma/client';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { runWithTenant, runWithoutTenant } from '../tenancy/tenant-context';
-import { tenantScoped } from '../tenancy/tenant-scoped';
 import { UserResponse, toUserResponse } from '../users/user-response';
 import type {
   AccessTokenPayload,
   AuthenticatedUser,
 } from './authenticated-user';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { HashingService } from './hashing.service';
 import { INVALID_REFRESH, RefreshTokenService } from './refresh-token.service';
 
@@ -45,61 +37,6 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly refreshTokens: RefreshTokenService,
   ) {}
-
-  /**
-   * Creates a tenant and its first ADMIN.
-   *
-   * The scope changes halfway through a single transaction, which is the most
-   * delicate few lines in the module. `Tenant` is the one tenant-agnostic
-   * model, so it is created under `runWithoutTenant()`; the user is scoped, so
-   * it is created under `runWithTenant(tenant.id)` — and both must be in the
-   * same transaction, or a duplicate domain leaves a tenant with no way in.
-   *
-   * Two things make it work, and both are properties worth knowing rather than
-   * assuming: the extension applies to the transaction client `tx`, and
-   * AsyncLocalStorage survives the awaits inside the callback.
-   * `test/integration/auth-registration.int-spec.ts` pins both.
-   */
-  async register(dto: RegisterDto): Promise<AuthResult> {
-    // Outside the transaction on purpose: bcrypt at production cost takes
-    // hundreds of milliseconds, and holding a database connection open for it
-    // is how a login storm exhausts the pool.
-    const passwordHash = await this.hashing.hash(dto.password);
-
-    try {
-      const user = await runWithoutTenant(() =>
-        this.prisma.$transaction(async (tx) => {
-          const tenant = await tx.tenant.create({
-            data: { name: dto.tenantName, domain: dto.tenantDomain },
-          });
-
-          return runWithTenant(tenant.id, () =>
-            tx.user.create({
-              data: tenantScoped({
-                email: dto.email,
-                passwordHash,
-                role: UserRole.ADMIN,
-              }),
-            }),
-          );
-        }),
-      );
-
-      return this.issueTokens(user);
-    } catch (error) {
-      // Checked rather than pre-queried: a "is this domain taken?" read before
-      // the insert is a race, and the unique index has to be handled anyway.
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          `The domain "${dto.tenantDomain}" is already registered`,
-        );
-      }
-      throw error;
-    }
-  }
 
   /**
    * Exchanges a tenant domain, an e-mail and a password for an access token.
@@ -198,9 +135,9 @@ export class AuthService {
     };
 
     // The refresh token is recorded in a tenant-scoped table, so this needs a
-    // scope. login() and register() both call this from outside one — login
-    // has just left the tenant lookup, and register's transaction has already
-    // closed — so it is opened here rather than at three call sites.
+    // scope. Both callers reach it from outside one — login has just left the
+    // tenant lookup, and refresh's own scope has closed — so it is opened here
+    // rather than at each call site.
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload),
       runWithTenant(user.tenantId, () => this.refreshTokens.issue(user.id)),

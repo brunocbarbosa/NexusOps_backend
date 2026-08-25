@@ -14,6 +14,7 @@ in `documents/`; execution records (plan, checklist) do too.
 | ------------------------------------------------ | -------------------------------------------------------------------------- |
 | [`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md) | editing `src/tenancy/`, or after any Prisma upgrade                        |
 | [`USERS.md`](./USERS.md)                         | touching `src/auth/`, `src/users/`, or a DTO in any module                 |
+| [`PLATFORM.md`](./PLATFORM.md)                   | touching `src/platform/`, or integrating a platform console                |
 | [`RLS_NOTES.md`](./RLS_NOTES.md)                 | implementing Row-Level Security — which **does not exist yet** in the code |
 
 All of them were measured against this repository's versions — Prisma 7.9.1, PostgreSQL 17, bcrypt

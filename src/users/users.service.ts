@@ -14,6 +14,7 @@ import { UserRole } from '../generated/prisma/enums';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { tenantScoped } from '../tenancy/tenant-scoped';
+import { administersUsers } from './administers-users';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -84,7 +85,7 @@ export class UsersService {
     query: QueryUsersDto,
     requester: AuthenticatedUser,
   ): Promise<PaginatedUsers> {
-    if (query.includeDeleted && requester.role !== UserRole.ADMIN) {
+    if (query.includeDeleted && !administersUsers(requester.role)) {
       throw new ForbiddenException('Only an ADMIN may list deactivated users');
     }
 
@@ -252,12 +253,13 @@ export class UsersService {
   private async load(id: string, requester: AuthenticatedUser): Promise<User> {
     const user = await this.prisma.user.findUnique({ where: { id } });
 
-    // A deactivated user is visible to an ADMIN, who needs to see them in order
-    // to restore them, and invisible to everyone else — the same answer
-    // `GET /users` gives without `includeDeleted`.
+    // A deactivated user is visible to whoever administers this company's users
+    // — its own ADMIN, or the ADMIN_MASTER acting inside it — because restoring
+    // them requires seeing them first. Invisible to everyone else, which is the
+    // same answer `GET /users` gives without `includeDeleted`.
     if (
       !user ||
-      (user.deletedAt !== null && requester.role !== UserRole.ADMIN)
+      (user.deletedAt !== null && !administersUsers(requester.role))
     ) {
       throw new NotFoundException(`No user ${id}`);
     }

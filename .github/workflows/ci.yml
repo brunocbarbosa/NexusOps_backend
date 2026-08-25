@@ -363,12 +363,25 @@ jobs:
           #
           # NODE_ENV is deliberately not passed through — the image keeps its own
           # `production`, which makes this step also exercise the placeholder
-          # JWT_SECRET refusal. The database does not need to exist: Prisma
-          # connects on the first query, and none happens here.
+          # secret refusals.
+          #
+          # `--network host`, and not `-p 3000:3000`, because this step now
+          # touches the database. PlatformBootstrapService seeds the single
+          # ADMIN_MASTER in onModuleInit, so the boot no longer completes without
+          # a reachable Postgres — where it used to be true that "Prisma connects
+          # on the first query, and none happens here". The database already
+          # exists: `npm run test:setup` above started it and applied the
+          # migrations. It was only unreachable, because DATABASE_URL points at
+          # localhost:5433 and under bridge networking that is the container
+          # itself. The smoke step below already runs this way.
+          #
+          # The step is stronger for it. It stopped being only "the build emitted
+          # something" and became "the image boots against a real database and
+          # provisions its operator".
           set -a
           . ./.env.test
           set +a
-          docker run -d --rm --name nexusops-boot -p 3000:3000 \
+          docker run -d --rm --name nexusops-boot --network host \
             -e PORT=3000 \
             -e DATABASE_URL="$DATABASE_URL" \
             -e JWT_SECRET="$JWT_SECRET" \
@@ -376,6 +389,8 @@ jobs:
             -e JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \
             -e JWT_REFRESH_EXPIRES_IN="$JWT_REFRESH_EXPIRES_IN" \
             -e BCRYPT_SALT_ROUNDS="$BCRYPT_SALT_ROUNDS" \
+            -e ADMIN_MASTER_EMAIL="$ADMIN_MASTER_EMAIL" \
+            -e ADMIN_MASTER_PASSWORD="$ADMIN_MASTER_PASSWORD" \
             "$IMAGE_REF"
           for i in $(seq 1 30); do
             if curl -fsS localhost:3000 > /dev/null; then

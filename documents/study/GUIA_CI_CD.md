@@ -9,8 +9,6 @@
 >
 > Documentos vizinhos, com propósitos diferentes:
 >
-> - [`CHECKLIST_TESTS_CICD.md`](../CHECKLIST_TESTS_CICD.md) — o acompanhamento item a item do que
->   foi implementado e do que continua pendente.
 > - [`GUIA_VARIAVEIS_AMBIENTE.md`](./GUIA_VARIAVEIS_AMBIENTE.md) — o mesmo tratamento didático, para
 >   as variáveis de ambiente: o que cada uma faz e quem a lê.
 > - [`important/`](../important/) — as referências profundas: o comportamento medido da extensão de

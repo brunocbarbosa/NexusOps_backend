@@ -27,9 +27,11 @@ type MaybeAuthenticatedRequest = {
  * Requests with no authenticated user pass through with **no** scope at all,
  * not with an empty one. That is deliberate: `requireTenantId()` then throws,
  * so a public route that forgets to say which tenant it means fails loudly
- * instead of reading somebody's rows. The three routes that legitimately run
- * without a tenant (register, login, refresh) say so with `runWithoutTenant()`
- * or establish the tenant themselves.
+ * instead of reading somebody's rows. The routes that legitimately run without
+ * a tenant say so with `runWithoutTenant()` or establish one themselves: login
+ * and refresh, which have no authenticated user yet, and the platform's company
+ * routes, whose caller is scoped to the platform tenant but is asking about
+ * every other one.
  */
 @Injectable()
 export class TenantContextInterceptor implements NestInterceptor {

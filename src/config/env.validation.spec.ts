@@ -10,6 +10,8 @@ describe('validateEnv', () => {
     JWT_REFRESH_SECRET: 'a-different-secret-long-enough',
     JWT_REFRESH_EXPIRES_IN: '7d',
     BCRYPT_SALT_ROUNDS: '4',
+    ADMIN_MASTER_EMAIL: 'operator@nexusops.test',
+    ADMIN_MASTER_PASSWORD: 'a-long-enough-operator-password',
   };
 
   it('accepts a complete environment', () => {
@@ -54,6 +56,8 @@ describe('validateEnv', () => {
     ['JWT_REFRESH_EXPIRES_IN', 'forever'],
     ['NODE_ENV', 'produciton'],
     ['BCRYPT_SALT_ROUNDS', '3'],
+    ['ADMIN_MASTER_EMAIL', 'not-an-email'],
+    ['ADMIN_MASTER_PASSWORD', 'short'],
   ])('rejects a malformed %s', (key, value) => {
     expect(() => validateEnv({ ...valid, [key]: value })).toThrow(
       new RegExp(key),
@@ -82,6 +86,26 @@ describe('validateEnv', () => {
     expect(() =>
       validateEnv({ ...valid, JWT_REFRESH_SECRET: valid.JWT_SECRET }),
     ).toThrow(/must differ from JWT_SECRET/);
+  });
+
+  // The account it guards can create every company and every user in them, so
+  // the published placeholder is not a weak password — it is a known one.
+  it('refuses the .env.example ADMIN_MASTER_PASSWORD in production', () => {
+    expect(() =>
+      validateEnv({
+        ...valid,
+        NODE_ENV: 'production',
+        ADMIN_MASTER_PASSWORD: 'change-me-before-any-deployment',
+      }),
+    ).toThrow(/placeholder/);
+  });
+
+  // bcrypt silently truncates past 72 bytes, so a longer operator password
+  // would have a tail that never mattered — caught here rather than discovered.
+  it('refuses an ADMIN_MASTER_PASSWORD past bcrypt truncation', () => {
+    expect(() =>
+      validateEnv({ ...valid, ADMIN_MASTER_PASSWORD: 'x'.repeat(73) }),
+    ).toThrow(/ADMIN_MASTER_PASSWORD/);
   });
 
   it('tolerates the placeholder outside production', () => {
