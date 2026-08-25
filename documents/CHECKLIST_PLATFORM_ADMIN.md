@@ -105,33 +105,50 @@ O defeito a evitar: assim que `UserRole` ganha `ADMIN_MASTER`, o `@IsEnum(UserRo
 
 ### Variáveis
 
-- [ ] `ADMIN_MASTER_EMAIL` (`@IsEmail()`) em `EnvironmentVariables`
-- [ ] `ADMIN_MASTER_PASSWORD` (`@IsString() @MinLength(8) @MaxBytes(BCRYPT_MAX_BYTES)`,
+- [x] `ADMIN_MASTER_EMAIL` (`@IsEmail()`) em `EnvironmentVariables`
+- [x] `ADMIN_MASTER_PASSWORD` (`@IsString() @MinLength(8) @MaxBytes(BCRYPT_MAX_BYTES)`,
       reaproveitando `src/auth/password.constraints.ts`)
-- [ ] Recusa do placeholder em produção, no mesmo bloco que já recusa o `JWT_SECRET` de exemplo
-- [ ] `.env.example` atualizado
-- [ ] `.env.test` atualizado
+- [x] Recusa do placeholder em produção, no mesmo bloco que já recusa o `JWT_SECRET` de exemplo
+- [x] `.env.example` atualizado
+- [x] `.env.test` atualizado (e o `.env` local, que é gitignored, para o `start:dev` subir)
 - [ ] (o passo de boot da CI é a Fase 5 — a quarta porta)
 
 ### O seeder
 
-- [ ] `src/platform/platform.constants.ts` — `PLATFORM_TENANT_DOMAIN = 'platform'`,
+- [x] `src/platform/platform.constants.ts` — `PLATFORM_TENANT_DOMAIN = 'platform'`,
       `PLATFORM_TENANT_NAME`. Em código, não no `.env`: menos peças móveis
-- [ ] `src/platform/platform-bootstrap.service.ts` — `OnModuleInit`, upsert idempotente com a
-      mesma forma da transação de `AuthService.register` (escopo que muda no meio:
-      `runWithoutTenant` para o `Tenant`, `runWithTenant` para o `User`)
-- [ ] O upsert do usuário reescreve `passwordHash` e zera `deletedAt` — o `.env` é a fonte da
-      verdade, então rotacionar a senha lá tem efeito, e um admin_master desativado volta
-- [ ] `PlatformModule` importa `AuthModule` (ordem de init: `HashingService.onModuleInit` precisa
+- [x] `src/platform/platform-bootstrap.service.ts` — `OnModuleInit`, idempotente, com o mesmo
+      escopo que muda no meio (`runWithoutTenant` para o `Tenant`, `runWithTenant` para o `User`).
+      **Sem transação única, ao contrário de `register`**, e de propósito: aqui uma aplicação
+      parcial se cura no boot seguinte, enquanto em `register` ela deixaria um tenant sem
+      ninguém que consiga entrar. Evita também segurar uma conexão durante um bcrypt
+- [x] O `.env` é a fonte da verdade: senha e email rotacionados lá têm efeito, e um
+      admin_master desativado volta (`deletedAt: null`).
+      **Busca por `role`, não por email** — divergência deliberada do plano: com a chave no
+      email, mudar `ADMIN_MASTER_EMAIL` tentaria criar um _segundo_ operador e morreria no
+      índice único; por `role`, a mesma mudança renomeia o que existe.
+      O hash só é reescrito quando a senha muda de fato — bcrypt saliza aleatoriamente, então
+      hashear sempre reescreveria a linha a cada boot à toa
+- [x] `PlatformModule` importa `AuthModule` (ordem de init: `HashingService.onModuleInit` precisa
       ter construído o decoy hash antes)
-- [ ] Registrado no `AppModule`
+- [x] Registrado no `AppModule`
 
 ### Verificação
 
-- [ ] Login do admin_master funciona **sem nenhuma mudança em `src/auth/`**:
-      `POST /auth/login { tenantDomain: "platform", … }` — saída real mostrada
-- [ ] `npm run typecheck` verde
-- [ ] Commit + checkpoint
+- [x] Login do admin_master funciona **sem nenhuma mudança em `src/auth/`**:
+      `POST /auth/login { tenantDomain: "platform", … }` → 200 com `role: "ADMIN_MASTER"`;
+      `GET /auth/me` → 200; senha errada → 401
+- [x] Idempotência em boot limpo: segundo boot sem mudança no `.env` loga
+      "already up to date" e não escreve
+- [x] Rotação de **senha** pelo `.env`: senha antiga → 401, nova → 200
+- [x] Rotação de **email** pelo `.env`: renomeia em vez de duplicar — email antigo → 401,
+      novo → 200, e o banco segue com exatamente 1 `ADMIN_MASTER` e 1 platform tenant
+- [x] `npm run typecheck` verde
+- [x] `npm run test:all` verde — 112 unit, 50 integration, 52 e2e
+- [x] `npx eslint` (read-only) e `npm run format:check` verdes
+- [x] `env.validation.spec.ts` estendido: email malformado, senha curta, o placeholder de
+      produção e a truncagem de 72 bytes do bcrypt
+- [x] Commit + checkpoint
 
 ---
 

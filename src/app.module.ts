@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
+import { PlatformModule } from './platform/platform.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -21,6 +22,7 @@ import { UsersModule } from './users/users.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    PlatformModule,
   ],
   controllers: [AppController],
   providers: [AppService],
