@@ -22,12 +22,9 @@ Other documents, by purpose:
 | File                                         | Read it when                                                    |
 | -------------------------------------------- | --------------------------------------------------------------- |
 | `documents/MAIN.md`                          | implementing anything architectural — the spec                  |
-| `documents/CHECKLIST_TESTS_CICD.md`          | you want to know what is done and what is still pending         |
-| `documents/CHECKLIST_USERS_AUTH.md`          | same, for the users and auth slice                              |
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
 | `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
 | `documents/important/`                       | the deep references below — kept together so they stay findable |
-| `documents/FRONTEND_PLATFORM_SPEC.md`        | you are writing, or briefing, the frontend                      |
 
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the tenancy layer, in two parts: the contract a
@@ -308,9 +305,6 @@ string — is in **`documents/important/USERS.md`**, Part II. Read it before edi
 `src/users/`, or a DTO in any module. Part I of the same file is the API contract — the three
 tables, every endpoint with its real request and response payloads, and the full error
 catalogue — and is what a client integrates against without reading the source.
-
-`documents/FRONTEND_PLATFORM_SPEC.md` is the closed, self-contained brief for whoever writes the
-frontend: both consoles, every route, and the rules a UI gets wrong on its own.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
