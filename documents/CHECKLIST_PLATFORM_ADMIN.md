@@ -213,7 +213,7 @@ Exercitado contra o servidor rodando, com saída real:
 - [x] `/platform/companies/<platform-id>` em GET, `/users` e DELETE → **404** nos três
 - [x] `domain: "platform"` → 400 `domain "platform" is reserved for the platform itself`
 - [x] `role: "ADMIN_MASTER"` pela rota de plataforma → 400 `role must be one of the
-  following values: ADMIN, AGENT, REQUESTER`
+following values: ADMIN, AGENT, REQUESTER`
 - [x] UUID de company inexistente → **404**, não página vazia (é o `requireCompany`)
 - [x] Desativar → 204; lista sem `includeDeleted` 2, com `includeDeleted` 3 (é a mudança
       do `administersUsers` — antes o ADMIN_MASTER levava 403 aqui); GET do desativado 200;
@@ -230,24 +230,55 @@ Exercitado contra o servidor rodando, com saída real:
 
 ## Fase 4 — Fechar `/auth/register`
 
-- [ ] Rota removida de `src/auth/auth.controller.ts`
-- [ ] `AuthService.register` removido (a transação já viveu para `CompaniesService.create`)
-- [ ] `src/auth/dto/register.dto.ts` removido
-- [ ] Rotas públicas passam a ser: `POST /auth/login`, `POST /auth/refresh`, `GET /`
+- [x] Rota removida de `src/auth/auth.controller.ts`
+- [x] `AuthService.register` removido (a transação já viveu para `CompaniesService.create`)
+- [x] `src/auth/dto/register.dto.ts` removido
+- [x] Rotas públicas passam a ser: `POST /auth/login`, `POST /auth/refresh`, `GET /`
 
 ### Os fixtures que isto quebra
 
-- [ ] `test/utils/platform-session.ts` — `loginAsAdminMaster(app)` (login real, credenciais de
+- [x] `test/utils/platform-session.ts` — `loginAsAdminMaster(app)` (login real, credenciais de
       `.env.test`) e `createCompany(app, session, label)`
-- [ ] `test/e2e/users.e2e-spec.ts` — `newTenant()` migrado para o helper novo
-- [ ] `test/integration/users-tenancy.int-spec.ts` — `seed()` migrado
-- [ ] `test/integration/auth-registration.int-spec.ts` → `platform-companies.int-spec.ts`
-- [ ] `test/e2e/auth.e2e-spec.ts` atualizado
+- [x] `test/e2e/users.e2e-spec.ts` — `newTenant()` migrado para o helper novo
+- [x] `test/integration/users-tenancy.int-spec.ts` — `seed()` migrado
+- [x] `test/integration/auth-registration.int-spec.ts` → `platform-companies.int-spec.ts`
+- [x] `test/e2e/auth.e2e-spec.ts` atualizado
+
+### Onde a cobertura foi parar
+
+Os testes de validação que viviam em `POST /auth/register` não foram apagados: mudaram de dono
+junto com a responsabilidade.
+
+- [x] `src/platform/companies.service.spec.ts` — o `describe('register')` de
+      `auth.service.spec.ts` reapontado para `CompaniesService.create` (hash antes da
+      transação, 409 no domínio duplicado, erro de banco não traduzido), mais o escopo
+      `unscoped` de toda query de company e os dois 404 do `requireCompany`
+- [x] `test/e2e/platform.e2e-spec.ts` — criado já nesta fase, não na 6, para a cobertura não
+      cair no intervalo: email malformado, senha curta, senha além dos 72 bytes do bcrypt,
+      domínio que não é hostname, o domínio reservado, company sem admin, campo inesperado,
+      403 do ADMIN de company e 401 sem token
+- [x] `test/utils/platform-session.ts` — `loginAsAdminMaster`, `createCompany`,
+      `newCompanySession` e `loginAs`. Tudo pelas rotas HTTP reais: nenhum token forjado,
+      nenhum provider sobrescrito, nenhuma linha inserida por trás da aplicação. Logar como
+      ADMIN_MASTER é, ele próprio, o teste de que o bootstrap rodou
+- [x] Os tipos `UserBody` / `AuthBody` passaram a vir do helper em vez de serem redeclarados
+      no spec — a forma que o fixture constrói e a que a asserção lê viraram uma declaração só
 
 ### Verificação
 
-- [ ] `npm run test:all` verde — saída real mostrada
-- [ ] Commit + checkpoint
+- [x] `npm run typecheck` verde
+- [x] `npm run test:all` verde — 120 unit, 52 integration, 59 e2e (eram 112/50/52)
+- [x] `npx eslint` (read-only) e `npm run format:check` verdes
+- [x] `POST /auth/register` → **404**, e 404 também com um token de ADMIN_MASTER: a rota
+      sumiu, não foi apenas trancada. Um frontend que ainda a chame precisa do "não existe"
+      honesto, não de um 401 que se lê como "faça login primeiro"
+- [x] Caso do domínio reservado **falsificado**: remover `@NotEquals` faz o teste e2e falhar;
+      restaurar faz passar
+- [x] Comentários que ficaram falsos corrigidos em `public.decorator.ts` ("só três rotas:
+      register, login, refresh") e `tenant-context.interceptor.ts` (mesma lista)
+- [x] Imports órfãos removidos de `auth.service.ts` e `auth.service.spec.ts`
+      (`ConflictException`, `Prisma` — só o `register` os usava)
+- [x] Commit + checkpoint
 
 ---
 

@@ -50,7 +50,8 @@ export class CompaniesService {
   /**
    * Creates a company and its first ADMIN, in one transaction.
    *
-   * This is `AuthService.register` moved rather than rewritten, and the delicate
+   * This is the transaction that used to be `AuthService.register`, moved rather
+   * than rewritten when company creation became the operator's job. The delicate
    * part is unchanged: the scope changes halfway through a single transaction,
    * because `Tenant` is tenant-agnostic and `User` is not. Both halves must
    * commit together — a duplicate domain that left a tenant behind would leave a
