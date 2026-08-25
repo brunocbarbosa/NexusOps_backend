@@ -382,29 +382,50 @@ Números: **128 unit, 59 integration, 76 e2e** (eram 120/52/59 no fim da Fase 4)
 frontend sem abrir uma linha do backend. Payloads **capturados da aplicação rodando**, não
 deduzidos dos DTOs.
 
-- [ ] **Autenticação**: o par de tokens, `Authorization: Bearer`, rotação por `/auth/refresh`, e
+- [x] **Autenticação**: o par de tokens, `Authorization: Bearer`, rotação por `/auth/refresh`, e
       o ponto que muda a tela de login — `tenantDomain` é obrigatório, e o admin_master entra com
       o domínio reservado `platform`
-- [ ] **Os dois papéis de tela**, e por que a UI ramifica: `ADMIN_MASTER` vê o console de
+- [x] **Os dois papéis de tela**, e por que a UI ramifica: `ADMIN_MASTER` vê o console de
       plataforma e nunca `/users`; `ADMIN` vê `/users` da própria company e leva 403 em
       `/platform/**`. Papéis **não são hierárquicos** — pertinência numa lista, não ordenação
-- [ ] **`/auth/register` não existe mais** — dito explicitamente, porque é a mudança que quebra
+- [x] **`/auth/register` não existe mais** — dito explicitamente, porque é a mudança que quebra
       um frontend já escrito
-- [ ] Tabela de rotas no formato de `USERS.md`, e uma entrada por rota com request/response reais
-- [ ] Formas nomeadas reaproveitadas de `USERS.md` (`UserResponse`, `AuthResult`, `{ data, meta }`),
+- [x] Tabela de rotas no formato de `USERS.md`, e uma entrada por rota com request/response reais
+- [x] Formas nomeadas reaproveitadas de `USERS.md` (`UserResponse`, `AuthResult`, `{ data, meta }`),
       mais a nova `CompanyResponse`
-- [ ] **Catálogo de erros** com o envelope exato (`message` string em erro de negócio, **array**
+- [x] **Catálogo de erros** com o envelope exato (`message` string em erro de negócio, **array**
       em validação; 401 sem a chave `error`; 204 sem corpo) e as regras que a UI trata como
       estado, não como exceção:
-  - [ ] **404, nunca 403, para recurso de outra company** — a UI não deve inferir "existe mas não
+  - [x] **404, nunca 403, para recurso de outra company** — a UI não deve inferir "existe mas não
         posso" a partir de um 404
-  - [ ] **403 é sempre papel insuficiente**, e só isso
-  - [ ] **409 é pedido bem-formado recusado pelo estado** (email duplicado, último ADMIN ativo,
+  - [x] **403 é sempre papel insuficiente**, e só isso
+  - [x] **409 é pedido bem-formado recusado pelo estado** (email duplicado, último ADMIN ativo,
         usuário já desativado) — os que merecem mensagem específica na tela
-  - [ ] **400 com `role: "ADMIN_MASTER"`** — o seletor de papel oferece só ADMIN/AGENT/REQUESTER
-  - [ ] **`perPage` acima de 100 é 400**, não clamp silencioso
-- [ ] **Fluxos completos**, na ordem em que uma tela os executa: login → criar company com seu
+  - [x] **400 com `role: "ADMIN_MASTER"`** — o seletor de papel oferece só ADMIN/AGENT/REQUESTER
+  - [x] **`perPage` acima de 100 é 400**, não clamp silencioso
+- [x] **Fluxos completos**, na ordem em que uma tela os executa: login → criar company com seu
       primeiro ADMIN (um formulário só, porque o backend exige os dois juntos) → criar usuários →
       listar/filtrar/paginar → desativar e restaurar → apagar company (**cascade irreversível**,
       exige confirmação destrutiva explícita)
-- [ ] Commit + checkpoint
+- [x] Commit + checkpoint
+
+### Verificação
+
+- [x] Todos os payloads capturados da aplicação rodando, **dos dois consoles** — não só do de
+      plataforma. As strings de erro são as strings reais, não parafraseadas
+- [x] Os 18 blocos ```json` do documento parseiam como JSON válido (checado programaticamente)
+- [x] `npm run format:check`, `npm run typecheck`, `npx eslint` e `npm run test:all` verdes
+      (128 / 59 / 76)
+
+### O que a captura corrigiu, e eu teria escrito errado
+
+- **`401` nem sempre vem sem a chave `error`.** O do guard vem (`{"message":"Unauthorized",
+"statusCode":401}`); um `401` lançado de propósito — senha atual errada, refresh token inválido,
+  credenciais inválidas — vem **com** `error`. Um frontend que use a presença de `error` para
+  decidir "faça login de novo" erra. Está dito explicitamente na spec
+- **A mensagem do último ADMIN tem o verbo parametrizado**: existe `cannot be deactivated` e
+  `cannot be demoted`. A tabela lista as duas
+- **`Validation failed (uuid is expected)` é uma string, não um array**, ao contrário dos outros
+  400 de validação
+- **O conflito de email desativado carrega o id do usuário** no texto, o que permite ao formulário
+  de "criar usuário" virar um "restaurar este usuário" em vez de um beco sem saída
