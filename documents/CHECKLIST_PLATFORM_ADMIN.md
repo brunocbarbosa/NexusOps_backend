@@ -111,7 +111,7 @@ O defeito a evitar: assim que `UserRole` ganha `ADMIN_MASTER`, o `@IsEnum(UserRo
 - [x] Recusa do placeholder em produção, no mesmo bloco que já recusa o `JWT_SECRET` de exemplo
 - [x] `.env.example` atualizado
 - [x] `.env.test` atualizado (e o `.env` local, que é gitignored, para o `start:dev` subir)
-- [ ] (o passo de boot da CI é a Fase 5 — a quarta porta)
+- [x] O passo de boot da CI — a quarta porta — foi feito na Fase 5
 
 ### O seeder
 
