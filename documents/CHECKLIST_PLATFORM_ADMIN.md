@@ -353,16 +353,26 @@ Números: **128 unit, 59 integration, 76 e2e** (eram 120/52/59 no fim da Fase 4)
 
 ### Documentação
 
-- [ ] `documents/important/PLATFORM.md` — novo, em duas partes no formato de `USERS.md`.
+- [x] `documents/important/PLATFORM.md` — novo, em duas partes no formato de `USERS.md`.
       Parte I: rotas, payloads reais capturados, catálogo de erros. Parte II, o medido: por que
       o tenant de plataforma em vez de `tenantId` nullable, por que `isPlatform` é `Boolean?`,
       por que a criação de company exige um ADMIN, e o índice parcial com a nota de drift
-- [ ] `documents/important/USERS.md` — `ADMIN_MASTER` na tabela de papéis, `/auth/register`
+- [x] `documents/important/USERS.md` — `ADMIN_MASTER` na tabela de papéis, `/auth/register`
       removido das rotas e das públicas, `ASSIGNABLE_ROLES` documentado
-- [ ] `documents/important/TENANCY_EXTENSION.md` — `runWithoutTenant()` deixa de ter "três usos,
+- [x] `documents/important/TENANCY_EXTENSION.md` — `runWithoutTenant()` deixa de ter "três usos,
       só o login"; a lista precisa incluir os da plataforma
-- [ ] `CLAUDE.md` e `README.md`
-- [ ] Commit + checkpoint
+- [x] `CLAUDE.md` — `src/platform/` no "what this is", a seção nova do operador de plataforma com
+      os três pontos load-bearing, `ADMIN_MASTER_*` na seção Environment, `--network host` na
+      descrição do job `docker`, e a lista de rotas públicas corrigida
+- [x] `README.md` — linha nova na tabela de status
+- [x] `documents/important/README.md` — `PLATFORM.md` no índice
+- [x] `documents/CHECKLIST_USERS_AUTH.md` — **nota de superação, sem reescrever o registro**: ele
+      diz que `POST /auth/register` público cria o tenant, e isso era verdade naquela fase. Um
+      checklist é registro de execução; reescrevê-lo apagaria o que de fato aconteceu
+- [x] Todos os payloads da Parte I de `PLATFORM.md` **capturados da aplicação rodando**, não
+      deduzidos dos DTOs — inclusive os corpos de erro exatos
+- [x] `npm run format:check` verde e `npm run test:all` verde (128 / 59 / 76)
+- [x] Commit + checkpoint
 
 ---
 

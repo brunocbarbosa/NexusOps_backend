@@ -9,6 +9,13 @@ custou medição e seria caro redescobrir — vai para
 
 Marcar cada item ao concluir. Cada fase termina com verificação + commit + checkpoint.
 
+> **Nota posterior — o que este arquivo registra deixou de ser verdade em um ponto.**
+> `POST /auth/register` foi **removido**. A criação de company passou a ser do `ADMIN_MASTER`, em
+> `POST /platform/companies`, junto com o primeiro `ADMIN`. Os itens abaixo não foram reescritos de
+> propósito: são o registro do que foi feito naquela fase, não a descrição do sistema hoje. Para o
+> estado atual, veja [`important/PLATFORM.md`](./important/PLATFORM.md) e
+> [`CHECKLIST_PLATFORM_ADMIN.md`](./CHECKLIST_PLATFORM_ADMIN.md).
+
 **Regra de execução:** implementar → rodar a verificação da fase e mostrar a saída real →
 marcar aqui → commit → parar e perguntar antes da próxima fase.
 

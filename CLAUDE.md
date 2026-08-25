@@ -11,7 +11,8 @@ Portuguese); read it before implementing anything architectural, since the "why"
 technology choice is recorded there.
 
 `src/tenancy/` is real, measured code and the load-bearing part of the project. `src/auth/` and
-`src/users/` are the first vertical built on it, and `src/prisma/` plus `src/config/` are what
+`src/users/` are the first vertical built on it, `src/platform/` is the second — the single
+`ADMIN_MASTER` and the CRUDs it drives — and `src/prisma/` plus `src/config/` are what
 connect the tenancy layer to Nest at all. `src/app.*` is still the scaffold, kept because the
 `docker` job in CI uses `GET /` as its liveness probe. Tickets, comments, the audit trail, the
 BullMQ queues and the WebSocket gateway are not written yet.
@@ -26,6 +27,7 @@ Other documents, by purpose:
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
 | `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
 | `documents/important/`                       | the deep references below — kept together so they stay findable |
+| `documents/FRONTEND_PLATFORM_SPEC.md`        | you are writing, or briefing, the frontend                      |
 
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the tenancy layer, in two parts: the contract a
@@ -34,7 +36,10 @@ for adding a model — and the measured Prisma 7.9.1 behaviour it depends on; re
 `src/tenancy/` or adding a tenant-scoped model), `USERS.md` (the auth and users reference, in two parts:
 the API contract a client integrates against — data model, every endpoint, every payload, every
 error — and the measured behaviour behind it; read it before editing `src/auth/`, `src/users/`, or
-a DTO in any module, and hand Part I to whoever writes the frontend) and `RLS_NOTES.md` (Row-Level
+a DTO in any module, and hand Part I to whoever writes the frontend), `PLATFORM.md` (the platform
+operator, in the same two parts: the company and company-user API a console integrates against, and
+the measured behaviour behind it — why the operator lives in a reserved tenant, why `isPlatform` is
+`Boolean?`, and the escalation the new enum value opened; read it before editing `src/platform/`) and `RLS_NOTES.md` (Row-Level
 Security, **not implemented yet**: the four steps that remain and how to check whether it is
 actually enforcing anything, plus the two traps measured here). They live together so that detail nobody needs today
 does not get lost.
@@ -149,6 +154,11 @@ sync when adding a variable, and add it to `EnvironmentVariables` in `src/config
 too: the application validates its environment at boot and refuses to start with a missing or
 malformed one, listing every problem at once.
 
+`ADMIN_MASTER_EMAIL` and `ADMIN_MASTER_PASSWORD` are required, not optional: the application seeds
+the single platform operator from them at boot, and one that starts with nobody able to create a
+company has started into a state with no way out of itself. They are the source of truth — changing
+either rotates the account on the next start, and the email change _renames_ rather than duplicating.
+
 `ConfigModule.forRoot` in `src/app.module.ts` is the only thing that loads `.env` for the running
 application — `nest start` does not read it, so before that existed the dev server had no
 `DATABASE_URL` at all. It does **not** overwrite a variable already present in `process.env`, which
@@ -258,13 +268,37 @@ enforcing anything are in **`documents/important/RLS_NOTES.md`**.
 from measured code into code that runs on every request. `TenantContextInterceptor` (registered in
 `src/app.setup.ts`) opens the `AsyncLocalStorage` scope from `request.user`; it is an interceptor
 and not middleware because `request.user` does not exist until the guards have run. `JwtAuthGuard`
-is a global `APP_GUARD`, so a route is authenticated unless it says `@Public()` — only register,
-login, refresh and the liveness `GET /` do. `RolesGuard` is the second one, and `@Roles()` narrows
+is a global `APP_GUARD`, so a route is authenticated unless it says `@Public()` — only login,
+refresh and the liveness `GET /` do. `RolesGuard` is the second one, and `@Roles()` narrows
 a route further.
 
 `src/users/` is the first domain module, and it is the worked example of the two rules above: no
 query in it writes a tenant filter, and another tenant's id answers 404 rather than 403 — the
 extension makes it not-found, and a 403 would confirm the id exists somewhere.
+
+**The platform operator.** `src/platform/` holds the single `ADMIN_MASTER`, seeded from
+`ADMIN_MASTER_EMAIL` / `ADMIN_MASTER_PASSWORD` at boot into one reserved tenant marked by
+`Tenant.isPlatform`. It owns the company CRUD and the company-user CRUD, and **`POST /auth/register`
+no longer exists** — a company is created, with its first ADMIN, at `POST /platform/companies`.
+
+Three things about it are load-bearing rather than incidental:
+
+- **The user routes reimplement nothing.** `/platform/companies/:companyId/users` resolves the
+  company and then runs the existing `UsersService` inside `runWithTenant(companyId)` — the shape
+  `TENANCY_EXTENSION.md` prescribes for a BullMQ worker. A second copy of that CRUD would be a
+  second place for the last-ADMIN guard and the 404-not-403 answer to drift.
+- **`CompaniesService.requireCompany()` 404s on the platform tenant too**, not only on an unknown
+  id. Without that, `/platform/companies/<platform-id>/users/<self>` lets the operator deactivate
+  itself and the installation is left with no operator.
+- **`ADMIN_MASTER` is not assignable through any route.** `ASSIGNABLE_ROLES` in
+  `src/users/assignable-role.ts` keeps it out of every DTO, because otherwise a company's own ADMIN
+  could mint a platform operator inside their company — an escalation out of the tenant. A partial
+  unique index on `users` is the second layer.
+
+Why the operator lives in a reserved tenant instead of a nullable `User.tenantId`, why `isPlatform`
+is `Boolean?`, why the enum value and its index cannot share a migration, and why the bootstrap is
+not one transaction are in **`documents/important/PLATFORM.md`**, Part II. Part I is the API
+contract, with payloads captured from the running application.
 
 Everything that decision rests on and that was measured rather than read — why login carries
 `tenantDomain`, the three places that legitimately use `runWithoutTenant()`, the transaction that
@@ -272,8 +306,11 @@ changes tenant scope halfway through, why refresh tokens need their own signing 
 72-byte truncation is a correctness constraint, and why `Boolean('false')` is `true` in a query
 string — is in **`documents/important/USERS.md`**, Part II. Read it before editing `src/auth/`,
 `src/users/`, or a DTO in any module. Part I of the same file is the API contract — the three
-tables, all twelve endpoints with their real request and response payloads, and the full error
+tables, every endpoint with its real request and response payloads, and the full error
 catalogue — and is what a client integrates against without reading the source.
+
+`documents/FRONTEND_PLATFORM_SPEC.md` is the closed, self-contained brief for whoever writes the
+frontend: both consoles, every route, and the rules a UI gets wrong on its own.
 
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
@@ -370,7 +407,11 @@ The pipeline runs seven jobs. Four are worth knowing about before you touch them
   live database, which is what keeps the Dockerfile's aggressive prune honest. The boot step feeds
   the container the `.env.test` values, because the application validates its environment and would
   otherwise exit before answering anything; `NODE_ENV` is deliberately not among them, so the image
-  keeps its own `production` and the step also exercises the placeholder-secret refusal.
+  keeps its own `production` and the step also exercises the placeholder-secret refusal. **The boot
+  step runs `--network host`**, and that is load-bearing: `PlatformBootstrapService` seeds the
+  `ADMIN_MASTER` in `onModuleInit`, so the boot no longer completes without a reachable Postgres —
+  and under bridge networking `localhost:5433` is the container itself. The database is already
+  running; `npm run test:setup` starts it earlier in the same job.
 - **`quality`** runs ESLint read-only, Prettier, and `tsc` twice — once over `tsconfig.build.json`,
   which is how production compiles, and once over the root config, which is the only thing that
   type-checks `test/` at all (see "Three test tiers").
