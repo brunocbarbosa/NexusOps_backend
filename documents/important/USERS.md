@@ -466,8 +466,6 @@ Real today, and a client will hit them:
 - **No OpenAPI/Swagger document.** This file is the contract; there is no generated spec to point a
   client generator at.
 
-The pending list lives in `documents/CHECKLIST_USERS_AUTH.md`.
-
 ---
 
 ## Part II — measured behaviour

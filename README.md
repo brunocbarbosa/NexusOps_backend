@@ -369,7 +369,6 @@ Project documentation is written in Portuguese; the code and its comments are in
 | [`documents/MAIN.md`](documents/MAIN.md)                                               | The authoritative specification — the "why" behind each technology  |
 | [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md) | Measured Prisma 7.9.1 behaviour the tenant extension depends on     |
 | [`documents/important/RLS_NOTES.md`](documents/important/RLS_NOTES.md)                 | Row-Level Security research, including two traps measured firsthand |
-| [`documents/CHECKLIST_TESTS_CICD.md`](documents/CHECKLIST_TESTS_CICD.md)               | What is done and what is still pending, item by item                |
 | [`documents/study/GUIA_CI_CD.md`](documents/study/GUIA_CI_CD.md)                       | The CI/CD setup explained from first principles                     |
 | [`CLAUDE.md`](CLAUDE.md)                                                               | Working agreements and traps, for both humans and AI agents         |
 
