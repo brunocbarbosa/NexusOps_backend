@@ -54,6 +54,7 @@ This is an in-progress portfolio project, and the README says exactly where it s
 | Row-Level Security (defense in depth)  | 🔬 Researched  | Behaviour measured and documented; policies and app role not written yet       |
 | Auth (JWT + RBAC)                      | ✅ Implemented | Global `JwtAuthGuard` + `RolesGuard`; refresh tokens signed with their own key |
 | Users module (`src/users/`)            | ✅ Implemented | The first vertical on the tenancy layer: CRUD, RBAC, cross-tenant id gives 404 |
+| Platform operator (`src/platform/`)    | ✅ Implemented | One `ADMIN_MASTER` seeded from the environment; company + company-user CRUDs   |
 | Ticket and comment modules             | 🚧 Planned     | Modelled in the schema; no domain module beyond users is written yet           |
 | Audit trail, BullMQ queues, WebSockets | 🚧 Planned     | Designed and modelled in the schema; modules not written yet                   |
 
@@ -368,7 +369,6 @@ Project documentation is written in Portuguese; the code and its comments are in
 | [`documents/MAIN.md`](documents/MAIN.md)                                               | The authoritative specification — the "why" behind each technology  |
 | [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md) | Measured Prisma 7.9.1 behaviour the tenant extension depends on     |
 | [`documents/important/RLS_NOTES.md`](documents/important/RLS_NOTES.md)                 | Row-Level Security research, including two traps measured firsthand |
-| [`documents/CHECKLIST_TESTS_CICD.md`](documents/CHECKLIST_TESTS_CICD.md)               | What is done and what is still pending, item by item                |
 | [`documents/study/GUIA_CI_CD.md`](documents/study/GUIA_CI_CD.md)                       | The CI/CD setup explained from first principles                     |
 | [`CLAUDE.md`](CLAUDE.md)                                                               | Working agreements and traps, for both humans and AI agents         |
 

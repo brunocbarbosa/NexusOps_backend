@@ -24,7 +24,12 @@ datasource db {
 // ==========================================
 // ENUMS
 // ==========================================
+// ADMIN_MASTER is the platform operator, not a company role. Exactly one exists, it
+// lives in the reserved platform tenant, and no API path can assign it -- see
+// ASSIGNABLE_ROLES in src/users/assignable-role.ts and the partial unique index in
+// the `admin_master_uniqueness` migration.
 enum UserRole {
+  ADMIN_MASTER
   ADMIN
   AGENT
   REQUESTER
@@ -47,6 +52,19 @@ model Tenant {
   domain    String?  @unique @db.VarChar(100)
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
+
+  // Marks the one reserved tenant the ADMIN_MASTER lives in.
+  //
+  // Nullable-and-unique rather than a plain Boolean, and that is the whole trick:
+  // PostgreSQL treats NULLs as distinct in a unique index, so "at most one row with
+  // true" falls out of a constraint the schema can express. No partial index, and
+  // therefore no drift on `prisma migrate dev`.
+  //
+  // It also keeps the company listing honest. Every company is `isPlatform: null`,
+  // so `where: { isPlatform: null }` is exact -- where `domain: { not: "platform" }`
+  // would silently drop every company whose domain is NULL, because
+  // NOT (NULL = 'platform') is NULL, not true.
+  isPlatform Boolean? @unique @map("is_platform")
 
   users         User[]
   tickets       Ticket[]

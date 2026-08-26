@@ -7,15 +7,15 @@ import { PRISMA } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import { runWithoutTenant } from '../../src/tenancy/tenant-context';
 import { createTestApp } from '../utils/create-test-app';
+import {
+  loginAsAdminMaster,
+  newCompanySession,
+} from '../utils/platform-session';
+import type { AuthBody, UserBody } from '../utils/platform-session';
 import { bodyOf } from '../utils/response-body';
 
-type UserBody = {
-  id: string;
-  email: string;
-  role: UserRole;
-  deletedAt: string | null;
-};
-type AuthBody = { accessToken: string; refreshToken: string; user: UserBody };
+// UserBody and AuthBody come from test/utils/platform-session, so the shapes the
+// fixtures build and the shapes the assertions read are one declaration.
 type PageBody = {
   data: UserBody[];
   meta: { total: number; page: number; perPage: number; totalPages: number };
@@ -29,21 +29,23 @@ describe('Users (e2e)', () => {
   const domains: string[] = [];
   const http = () => request(app.getHttpServer());
 
-  /** Registers a tenant and returns its first ADMIN session. */
+  /**
+   * Creates a company and returns its first ADMIN session.
+   *
+   * `POST /auth/register` is gone, so this goes the way a real deployment does:
+   * the ADMIN_MASTER — seeded from `.env.test` when the module booted — creates
+   * the company, and then its ADMIN logs in. Nothing is inserted behind the
+   * application's back and no token is forged.
+   */
+  let operator: AuthBody;
   const newTenant = async (label: string): Promise<AuthBody> => {
     const tenantDomain = `crud-${label}-${run}.example`;
     domains.push(tenantDomain);
-    return bodyOf<AuthBody>(
-      await http()
-        .post('/auth/register')
-        .send({
-          tenantName: `${label} Co`,
-          tenantDomain,
-          email: `admin@${label}.example`,
-          password: 'a-long-enough-password',
-        })
-        .expect(201),
-    );
+    return newCompanySession(app, operator, {
+      name: `${label} Co`,
+      domain: tenantDomain,
+      email: `admin@${label}.example`,
+    });
   };
 
   const as = (session: { accessToken: string }) => ({
@@ -62,6 +64,7 @@ describe('Users (e2e)', () => {
   beforeAll(async () => {
     app = (await createTestApp()) as INestApplication<App>;
     prisma = app.get<ExtendedPrismaClient>(PRISMA);
+    operator = await loginAsAdminMaster(app);
     owner = await newTenant('main');
   });
 

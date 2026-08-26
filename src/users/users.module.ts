@@ -11,5 +11,9 @@ import { UsersService } from './users.service';
   imports: [PrismaModule, AuthModule],
   controllers: [UsersController],
   providers: [UsersService],
+  // Exported for PlatformModule: the ADMIN_MASTER's user routes are a thin shell
+  // around this same service, run inside `runWithTenant(companyId)`. A second
+  // implementation of the same CRUD is a second place for the rules to drift.
+  exports: [UsersService],
 })
 export class UsersModule {}

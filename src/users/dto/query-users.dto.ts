@@ -1,7 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -9,7 +9,8 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { UserRole } from '../../generated/prisma/enums';
+import { ASSIGNABLE_ROLES } from '../assignable-role';
+import type { AssignableRole } from '../assignable-role';
 
 /**
  * `Boolean('false')` is `true`, so `enableImplicitConversion` — which the
@@ -46,9 +47,12 @@ export class QueryUsersDto {
   @Max(100)
   perPage: number = 20;
 
+  // Same list as the write DTOs, for one reason: filtering by a role no company
+  // user can hold would always return an empty page, which reads as "there are
+  // none" rather than "you cannot ask that".
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
+  @IsIn(ASSIGNABLE_ROLES)
+  role?: AssignableRole;
 
   // A `contains` on an unindexed column, and deliberately so: the scan is
   // already bounded by the tenant filter, and a tenant's user table is small
