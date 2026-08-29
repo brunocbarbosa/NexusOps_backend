@@ -38,3 +38,24 @@ export type ExtendedPrismaClient = ReturnType<typeof createPrismaClient>;
  * at `PrismaModule` for a type they only use structurally.
  */
 export const PRISMA = Symbol('PRISMA');
+
+/**
+ * The client handed to an interactive `$transaction(async (tx) => ...)`.
+ *
+ * `Prisma.TransactionClient` in the generated namespace is `Omit<
+ * DefaultPrismaClient, ITXClientDenyList>` — the *unextended* client — so it is
+ * the wrong type here: annotating a helper with it would quietly drop the
+ * tenancy extension from the type and let a call slip through that the running
+ * code would still scope, or worse, one it would not.
+ *
+ * The omitted keys are ITXClientDenyList spelled out. They are the operations
+ * that make no sense once a transaction is already open, and Prisma removes
+ * them at runtime whether or not the type says so.
+ *
+ * It exists as a named export because a service that wants one OCC chokepoint
+ * has to pass `tx` to a private helper, and a helper needs a parameter type.
+ */
+export type ExtendedTransactionClient = Omit<
+  ExtendedPrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;

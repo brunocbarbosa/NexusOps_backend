@@ -94,11 +94,93 @@ anonymised without deleting the history.
 
 ### Endpoints at a glance
 
-_Written as each module lands._
+Every route is authenticated — `JwtAuthGuard` is global — and the `Auth` column says what more is
+required. "any" means any authenticated user, narrowed per caller by the visibility rule above
+rather than by a guard.
+
+| Method  | Path                    | Auth             | Success | Purpose                                |
+| ------- | ----------------------- | ---------------- | ------- | -------------------------------------- |
+| `POST`  | `/tickets`              | any              | `201`   | open a ticket; requester is the caller |
+| `GET`   | `/tickets`              | any              | `200`   | paginated, filtered list               |
+| `GET`   | `/tickets/:id`          | any              | `200`   | one ticket                             |
+| `PATCH` | `/tickets/:id`          | any              | `200`   | title, description, priority, category |
+| `PATCH` | `/tickets/:id/status`   | `ADMIN`, `AGENT` | `200`   | move through the lifecycle             |
+| `PATCH` | `/tickets/:id/assignee` | `ADMIN`, `AGENT` | `200`   | assign, or unassign with `null`        |
+
+**There is no `DELETE`.** `CLOSED` is the terminal state and takes the role a delete would play. A
+ticket is the subject of an audit trail, and deleting it would delete what the trail is about.
+
+Query parameters on `GET /tickets`:
+
+| Parameter     | Default | Rules                                                            |
+| ------------- | ------- | ---------------------------------------------------------------- |
+| `page`        | `1`     | integer, at least 1                                              |
+| `perPage`     | `20`    | integer, 1 to 100                                                |
+| `status`      | —       | one of the four `TicketStatus` values                            |
+| `priority`    | —       | one of the four `TicketPriority` values                          |
+| `category`    | —       | one of the five `TicketCategory` values                          |
+| `assigneeId`  | —       | uuid                                                             |
+| `requesterId` | —       | uuid; **ignored for a `REQUESTER`**, who always gets their own   |
+| `unassigned`  | —       | `true` or `false`; a `400` if sent together with `assigneeId`    |
+| `search`      | —       | 1 to 255 characters, case-insensitive over title and description |
+
+The page envelope is the `{ data, meta }` one already defined in [`USERS.md`](./USERS.md); it is
+not redefined here. `meta.total` respects visibility — a requester's total counts only their own
+tickets, because a count that included invisible rows would announce that they exist.
 
 ### `TicketResponse`
 
-_Written in Fase 2._
+Every route that returns a ticket returns exactly this shape:
+
+```ts
+type TicketResponse = {
+  id: string;
+  number: number; // restarts at 1 per company; this is "chamado 142"
+  title: string;
+  description: string | null;
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  category: 'HARDWARE' | 'SOFTWARE' | 'NETWORK' | 'ACCESS' | 'OTHER';
+  version: number; // send it back on the next PATCH, or get a 400
+  requester: UserResponse;
+  assignee: UserResponse | null;
+  closedBy: UserResponse | null;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+`UserResponse` is the one defined in [`USERS.md`](./USERS.md). The three people are embedded rather
+than left as ids so that a list screen does not fetch one user per row. `tenantId` appears nowhere,
+on the ticket or on the people.
+
+**`version` is on the wire because it has to be.** A client cannot send it back on the next `PATCH`
+without having received it, and every write route requires it.
+
+### The lifecycle
+
+```
+OPEN ──────────► IN_PROGRESS ──────► RESOLVED ──────► CLOSED
+  ▲                   │                  │
+  └───────────────────┴──────────────────┘
+              (reopen, clears resolvedAt)
+```
+
+`OPEN` also goes straight to `RESOLVED`, for the ticket that answers itself. `CLOSED` goes nowhere:
+it is terminal, and a closed ticket also refuses `PATCH /tickets/:id`.
+
+Transitions carry side effects the client does not send and cannot override:
+
+| Destination | What the server stamps                             |
+| ----------- | -------------------------------------------------- |
+| `RESOLVED`  | `resolvedAt = now`                                 |
+| `OPEN`      | `resolvedAt = null` — reopening discards the claim |
+| `CLOSED`    | `closedAt = now`, `closedBy` = the caller          |
+
+Closing **keeps** `resolvedAt`. When the work finished is the whole point of a time-to-resolution
+report, and closing is an administrative act that happens afterwards.
 
 ### `CommentResponse`
 
@@ -180,7 +262,58 @@ concurrent first opens both find it missing, both insert, and one die on the pri
 
 ### `updateMany` and not `update`, and what a version conflict actually returns
 
-_Fase 2._
+`update` requires a unique `where`, and `{ id, version }` is not unique. So the safe write is
+`updateMany`, and the signal is its `count`:
+
+```ts
+const { count } = await tx.ticket.updateMany({
+  where: { id, version }, // tenantId injected by the extension
+  data: { ...changes, version: { increment: 1 } },
+});
+if (count === 0) throw new ConflictException(/* ... */);
+```
+
+What makes it work is PostgreSQL's row locking under READ COMMITTED, not anything in the service:
+the losing `UPDATE` blocks on the winner's lock, re-evaluates `version = 1` after the winner
+commits, matches nothing, and reports zero. Measured in
+`test/integration/ticket-occ.int-spec.ts`, which fires two `changeStatus` calls at the same version
+with `Promise.allSettled` and asserts one fulfilled, one `ConflictException`, and a version that
+moved by exactly one — three, and not two, would mean a change had silently vanished.
+
+**The read and the write share one interactive transaction, and that is what keeps 404 and 409
+apart.** Without the read, a caller could not tell "this ticket is not yours" from "somebody just
+changed it", and a client would have no way to know whether reloading is worth trying. The 409
+carries the current version in its message for the same reason.
+
+`data` is typed `Prisma.TicketUncheckedUpdateManyInput` rather than the checked variant: the checked
+one hides the relation scalars, and `assigneeId` and `closedById` are exactly what two of the three
+mutations set. The unchecked variant also exposes `tenantId`, which sounds like a hole and is not —
+the extension throws `CrossTenantWriteError` on any update whose data mentions it.
+
+### A nested `include` makes the `pg` adapter run two queries on one client
+
+Every ticket response embeds its requester, assignee and closer, which means `include` on every
+read. That turns out to emit a deprecation warning from `pg` 8.23:
+
+```
+DeprecationWarning: Calling client.query() when the client is already executing a query is
+deprecated and will be removed in pg@9.0.
+```
+
+Narrowed by elimination rather than guessed at. Three variants of the same `create` were run: with
+`include` inside an interactive transaction, with `include` outside one, and without `include`
+inside one. The first two warn, the third does not — so it is the `include` itself, and the
+transaction is irrelevant. `test/integration/ticket-numbering.int-spec.ts` runs twenty concurrent
+transactions and stays silent, which rules out concurrency as the cause.
+
+It is `@prisma/adapter-pg` issuing the relation queries on one checked-out client, not application
+code, and it is a warning rather than an error today. The consequence is forward-looking and worth
+writing down: **`pg` must not be moved to 9 without re-checking this**, because the behaviour it
+depends on is scheduled for removal there. `package.json` pins `^8.23.0`, so semver will not do it
+by accident.
+
+The alternative — dropping `include` and resolving the three users separately — was rejected: it
+trades a warning about a future major for an N+1 on every list screen today.
 
 ### Whether the tenant context survives an event-emitter `emit`
 

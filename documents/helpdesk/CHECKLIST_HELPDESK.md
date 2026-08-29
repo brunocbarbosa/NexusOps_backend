@@ -143,40 +143,53 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ### Arquivos
 
-- [ ] `src/tickets/tickets.module.ts`, `tickets.controller.ts`, `tickets.service.ts`
-- [ ] `src/tickets/ticket-response.ts` — `TicketResponse` + `toTicketResponse()`, allowlist campo a
+- [x] `src/tickets/tickets.module.ts`, `tickets.controller.ts`, `tickets.service.ts`
+- [x] `src/tickets/ticket-response.ts` — `TicketResponse` + `toTicketResponse()`, allowlist campo a
       campo, sem `tenantId`
-- [ ] `src/tickets/ticket-visibility.ts` — `seesEveryTicket(role)`, no padrão de
+- [x] `src/tickets/ticket-visibility.ts` — `seesEveryTicket(role)`, no padrão de
       `administers-users.ts`
-- [ ] `src/tickets/ticket-transitions.ts` — mapa de transições legais
-- [ ] `src/tickets/dto/` — `create-ticket`, `update-ticket`, `change-status`, `assign-ticket`,
+- [x] `src/tickets/ticket-transitions.ts` — mapa de transições legais
+- [x] `src/tickets/dto/` — `create-ticket`, `update-ticket`, `change-status`, `assign-ticket`,
       `query-tickets`
-- [ ] `TicketsModule` registrado em `src/app.module.ts` e exportando `TicketsService`
+- [x] `TicketsModule` registrado em `src/app.module.ts` e exportando `TicketsService`
 
 ### Regras
 
-- [ ] Nenhum filtro de tenant escrito à mão em nenhum arquivo do módulo
-- [ ] `tenantScoped()` no create de topo
-- [ ] Envelope `{ data, meta }` como `PaginatedTickets`, com `$transaction` em array para
+- [x] Nenhum filtro de tenant escrito à mão em nenhum arquivo do módulo
+- [x] `tenantScoped()` no create de topo
+- [x] Envelope `{ data, meta }` como `PaginatedTickets`, com `$transaction` em array para
       `count` + `findMany`, `orderBy` com desempate e `totalPages || 1`
-- [ ] `load(id, requester)` privado, 404 para invisível e para outro tenant
-- [ ] `ParseUUIDPipe` em todo path param
-- [ ] `unassigned` com os três decorators (`@IsBoolean`, `@Transform`, `@Type(() => String)`)
-- [ ] Transição ilegal responde `409`; `RESOLVED` carimba `resolvedAt`; `CLOSED` carimba `closedAt`
+- [x] `load(id, requester)` privado, 404 para invisível e para outro tenant
+- [x] `ParseUUIDPipe` em todo path param
+- [x] `unassigned` com os três decorators (`@IsBoolean`, `@Transform`, `@Type(() => String)`)
+- [x] Transição ilegal responde `409`; `RESOLVED` carimba `resolvedAt`; `CLOSED` carimba `closedAt`
       e `closedById`
-- [ ] OCC: `updateMany({ where: { id, version } })` com `version: { increment: 1 }`, e `count === 0`
+- [x] OCC: `updateMany({ where: { id, version } })` com `version: { increment: 1 }`, e `count === 0`
       vira `409` com a version atual na mensagem
 
 ### Verificação
 
-- [ ] `npm run test:unit` — `tickets.service.spec.ts` dentro de `runWithTenant` real, provando que o
+- [x] `npm run test:unit` — `tickets.service.spec.ts` dentro de `runWithTenant` real, provando que o
       service não escreve filtro de tenant
-- [ ] `npm run test:unit` — `query-tickets.dto.spec.ts` pelo `VALIDATION_PIPE_OPTIONS` real
-- [ ] `test/integration/ticket-occ.int-spec.ts` — dois updates concorrentes na mesma version
+- [x] `npm run test:unit` — `query-tickets.dto.spec.ts` pelo `VALIDATION_PIPE_OPTIONS` real
+- [x] `test/integration/ticket-occ.int-spec.ts` — dois updates concorrentes na mesma version
       produzem exatamente um `409`
-- [ ] `test/integration/tickets-tenancy.int-spec.ts` — id de outro tenant responde 404
-- [ ] `test/e2e/tickets.e2e-spec.ts` — papéis, validação e visibilidade do requester
-- [ ] `npm run typecheck` e `npx eslint "src/**/*.ts"` (read-only)
+- [x] `test/integration/tickets-tenancy.int-spec.ts` — id de outro tenant responde 404
+- [x] `test/e2e/tickets.e2e-spec.ts` — papéis, validação e visibilidade do requester
+- [x] `npm run typecheck` e `npx eslint "src/**/*.ts"` (read-only)
+
+### Não estava no plano
+
+- [x] `ExtendedTransactionClient` acrescentado a `src/prisma/prisma.client.ts`. O `mutate()` é o
+      chokepoint do OCC e precisa receber o `tx`, e `Prisma.TransactionClient` do client gerado é
+      `Omit<DefaultPrismaClient, ...>` — o client **sem** a extension, ou seja, o tipo errado
+- [x] O e2e pegou um bug que nenhum teste unitário meu pegava: fechar um chamado apagava o
+      `resolvedAt`, porque eu havia escrito "limpa quando o destino não é RESOLVED" em vez de
+      "limpa quando volta para OPEN". Corrigido, com um teste unitário novo travando a regra
+- [x] Medido que um `include` aninhado faz o `@prisma/adapter-pg` rodar duas queries no mesmo
+      client, o que o `pg` 8.23 deprecia e o `pg` 9 remove. Isolado por eliminação (com e sem
+      `include`, dentro e fora de transação) e registrado na Parte II do `HELPDESK.md`: o `pg` não
+      pode subir para 9 sem reavaliar isso
 
 ---
 

@@ -7,8 +7,8 @@
 > | Fase                         | Estado       | Commit    |
 > | ---------------------------- | ------------ | --------- |
 > | 0 — Branch e documentos      | ✅ concluída | `c47c4f9` |
-> | 1 — Schema e migration       | ✅ concluída | —         |
-> | 2 — Módulo `tickets`         | ⏳ pendente  | —         |
+> | 1 — Schema e migration       | ✅ concluída | `548e5ce` |
+> | 2 — Módulo `tickets`         | ✅ concluída | —         |
 > | 3 — Comentários              | ⏳ pendente  | —         |
 > | 4 — Trilha de auditoria      | ⏳ pendente  | —         |
 > | 5 — Fila BullMQ e relatórios | ⏳ pendente  | —         |
