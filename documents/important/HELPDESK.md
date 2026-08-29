@@ -46,7 +46,51 @@ follows, and for the same reason: a 403 would confirm that the id exists somewhe
 
 ### The data model
 
-_Written in Fase 1, once the migration lands._
+Five tables. Column names below are the **database** names; the API speaks camelCase. `tenant_id`
+is on every one of them and appears in no request or response — the tenancy extension puts it in and
+takes it out, and a DTO that mentions it is a `400`.
+
+`tickets` — the chamado itself.
+
+| Column                    | Type             | Notes                                                       |
+| ------------------------- | ---------------- | ----------------------------------------------------------- |
+| `id`                      | `uuid`           | what the API addresses                                      |
+| `number`                  | `integer`        | what a person says out loud; restarts at 1 in every company |
+| `requester_id`            | `uuid`           | who opened it; never changes                                |
+| `assignee_id`             | `uuid?`          | the agent working it, `NULL` while unassigned               |
+| `title`                   | `varchar(255)`   | required                                                    |
+| `description`             | `text?`          | optional                                                    |
+| `status`                  | `TicketStatus`   | `OPEN`                                                      | `IN_PROGRESS` | `RESOLVED` | `CLOSED`, default `OPEN`   |
+| `priority`                | `TicketPriority` | `LOW`                                                       | `MEDIUM`      | `HIGH`     | `URGENT`, default `MEDIUM` |
+| `category`                | `TicketCategory` | `HARDWARE`                                                  | `SOFTWARE`    | `NETWORK`  | `ACCESS`                   | `OTHER` |
+| `version`                 | `integer`        | optimistic concurrency; starts at 1                         |
+| `resolved_at`             | `timestamp?`     | stamped on the transition into `RESOLVED`                   |
+| `closed_at`               | `timestamp?`     | stamped on the transition into `CLOSED`                     |
+| `closed_by_id`            | `uuid?`          | who closed it                                               |
+| `created_at`/`updated_at` | `timestamp`      | `updated_at` is maintained by Prisma                        |
+
+`comments` — the thread inside a ticket. Append-only: there is no update and no delete.
+
+| Column        | Type        | Notes                                            |
+| ------------- | ----------- | ------------------------------------------------ |
+| `id`          | `uuid`      |                                                  |
+| `ticket_id`   | `uuid`      |                                                  |
+| `author_id`   | `uuid`      |                                                  |
+| `body`        | `text`      | required                                         |
+| `is_internal` | `boolean`   | default `false`; a `REQUESTER` never sees a true |
+| `created_at`  | `timestamp` |                                                  |
+
+`ticket_counters` — one row per company, holding the last number handed out. It has no API surface
+and is listed because it explains `tickets.number`: `tenant_id` is the primary key, `last_number` is
+an integer starting at 0.
+
+`audit_logs` — the trail. `entity_type` and `entity_id` say what changed, `action` says how,
+`old_values` and `new_values` are `JSONB`, and `user_id` is nullable so a deleted actor can be
+anonymised without deleting the history.
+
+`reports` — an asynchronous export. `status` is `PENDING` | `PROCESSING` | `COMPLETED` |
+`FAILED`, `filters` is the `JSONB` snapshot of the query that produced it, `content` holds the CSV,
+`row_count` and `completed_at` are filled on success, and `error` on failure.
 
 ### Endpoints at a glance
 
@@ -78,11 +122,61 @@ as each phase produces its measurement._
 
 ### Per-tenant ticket numbering, and the operation that makes it safe
 
-_Fase 1._
+`tickets.number` restarts at 1 in every company, so it cannot be the id and it cannot be a PostgreSQL
+sequence — a sequence is global. `SELECT MAX(number) + 1` is the obvious alternative and it is a
+race: two concurrent opens read the same maximum and claim the same number.
+
+What is used instead is a row in `ticket_counters` incremented inside the same interactive
+transaction as the insert:
+
+```ts
+const [counter] = await tx.ticketCounter.updateManyAndReturn({
+  where: {}, // the extension injects tenantId
+  data: { lastNumber: { increment: 1 } },
+});
+```
+
+Three properties carry it, and the third is the one that made this operation win over `update`:
+
+- `increment` compiles to `SET last_number = last_number + 1`, evaluated by PostgreSQL. Nothing is
+  read into Node and written back.
+- the UPDATE takes a row lock held until the transaction commits, so a second opener in the same
+  tenant blocks rather than reading a stale value.
+- `updateManyAndReturn` takes a **filter**, not a unique key, so `where: {}` is legal and the
+  tenancy extension supplies the tenant. `update` and `findUnique` would need the tenant id spelled
+  out in the service — the hand-written tenant filter this project exists to avoid.
+
+Measured, not assumed: `test/integration/ticket-numbering.int-spec.ts` opens 20 tickets with
+`Promise.all` in one tenant that already held number 1, and asserts the batch is exactly 2..21 —
+sorted, because commit order is not resolve order. It also asserts that the other tenant, seeded
+alongside, is still at `last_number = 1`. `updateManyAndReturn` returning rows on PostgreSQL was
+verified against Prisma 7.9.1 rather than taken from the docs, because the design has no fallback
+that keeps the "no hand-written filter" rule.
+
+The unique index `@([tenantId, number])` is the backstop, not the mechanism. If the counter
+logic ever regresses, the second writer fails with `P2002` instead of producing two "chamado 3".
+
+The cost is real and worth stating: ticket creation serialises per tenant. That is one row lock
+held for the length of one insert, and it is the price of a number a human can say.
 
 ### `TicketCounter` has no `@@unique([tenantId, id])`, and why that is safe
 
-_Fase 1._
+[`TENANCY_EXTENSION.md`](./TENANCY_EXTENSION.md) lists four requirements for a tenant-scoped model,
+and `ticket_counters` meets three. It has no `id` column at all — `tenant_id` is the primary key —
+so the composite unique cannot exist.
+
+That requirement is there to give the extension a way to scope a `findUnique`, which needs a unique
+`where`. Nothing ever calls `findUnique` on this model: the only two operations are the `create`
+that runs with the company and the `updateManyAndReturn` above, and `updateManyAndReturn` takes a
+filter. The tenant _is_ the key here, so there is nothing to scope.
+
+Do not copy the shape. It is safe for a model that is one row per tenant and is never read by id;
+for anything else the fourth requirement is not optional.
+
+The row is created in `CompaniesService.create`, in the same transaction as the company and its
+first ADMIN, rather than upserted when the first ticket is opened. An upsert would let two
+concurrent first opens both find it missing, both insert, and one die on the primary key. The
+`helpdesk_domain` migration backfills the companies that predate the table.
 
 ### `updateMany` and not `update`, and what a version conflict actually returns
 

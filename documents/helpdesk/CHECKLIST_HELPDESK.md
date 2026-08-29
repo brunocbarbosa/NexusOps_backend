@@ -72,54 +72,70 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ### Enums
 
-- [ ] `TicketPriority` — `LOW`, `MEDIUM`, `HIGH`, `URGENT`
-- [ ] `TicketCategory` — `HARDWARE`, `SOFTWARE`, `NETWORK`, `ACCESS`, `OTHER`
-- [ ] `ReportStatus` — `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`
-- [ ] `TicketStatus` confirmado **intocado** — acrescentar valor a enum existente não pode
+- [x] `TicketPriority` — `LOW`, `MEDIUM`, `HIGH`, `URGENT`
+- [x] `TicketCategory` — `HARDWARE`, `SOFTWARE`, `NETWORK`, `ACCESS`, `OTHER`
+- [x] `ReportStatus` — `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`
+- [x] `TicketStatus` confirmado **intocado** — acrescentar valor a enum existente não pode
       compartilhar migration com o uso do valor
 
 ### `Ticket`
 
-- [ ] `number Int` sequencial por tenant
-- [ ] `priority TicketPriority @default(MEDIUM)`
-- [ ] `category TicketCategory @default(OTHER)`
-- [ ] `resolvedAt DateTime?`, `closedAt DateTime?`
-- [ ] `closedById String? @db.Uuid` com FK composta `[tenantId, closedById]` → `users`, `Restrict`
-- [ ] `@@unique([tenantId, number])`
-- [ ] `@@index([tenantId, assigneeId])`, `@@index([tenantId, requesterId])`,
+- [x] `number Int` sequencial por tenant
+- [x] `priority TicketPriority @default(MEDIUM)`
+- [x] `category TicketCategory @default(OTHER)`
+- [x] `resolvedAt DateTime?`, `closedAt DateTime?`
+- [x] `closedById String? @db.Uuid` com FK composta `[tenantId, closedById]` → `users`, `Restrict`
+- [x] `@@unique([tenantId, number])`
+- [x] `@@index([tenantId, assigneeId])`, `@@index([tenantId, requesterId])`,
       `@@index([tenantId, createdAt])`
 
 ### `Comment`
 
-- [ ] `isInternal Boolean @default(false) @map("is_internal")`
+- [x] `isInternal Boolean @default(false) @map("is_internal")`
 
 ### `TicketCounter`
 
-- [ ] Modelo criado com `tenantId` como PK, `lastNumber Int @default(0)` e relação `Cascade`
-- [ ] **Confirmado que `updateManyAndReturn` existe no Prisma 7.9.1 para PostgreSQL** — se não,
+- [x] Modelo criado com `tenantId` como PK, `lastNumber Int @default(0)` e relação `Cascade`
+- [x] **Confirmado que `updateManyAndReturn` existe no Prisma 7.9.1 para PostgreSQL** — se não,
       cair no fallback `update({ where: { tenantId: requireTenantId() } })` e registrar o desvio
-- [ ] Linha criada na mesma transação que cria a empresa, em `src/platform/companies.service.ts`
-- [ ] Backfill na migration: `INSERT INTO ticket_counters (tenant_id, last_number) SELECT id, 0 FROM tenants;`
-- [ ] Desvio do checklist de `TENANCY_EXTENSION.md` (sem `@@unique([tenantId, id])`) anotado para a
+- [x] Linha criada na mesma transação que cria a empresa, em `src/platform/companies.service.ts`
+- [x] Backfill na migration: `INSERT INTO ticket_counters (tenant_id, last_number) SELECT id, 0 FROM tenants;`
+- [x] Desvio do checklist de `TENANCY_EXTENSION.md` (sem `@@unique([tenantId, id])`) anotado para a
       Parte II do `HELPDESK.md`
 
 ### `Report`
 
-- [ ] Modelo criado com `filters Json?`, `content String? @db.Text`, `rowCount`, `error`,
+- [x] Modelo criado com `filters Json?`, `content String? @db.Text`, `rowCount`, `error`,
       `completedAt` e FK composta para `users` com `Restrict`
-- [ ] `@@unique([tenantId, id])` e `@@index([tenantId, requestedById])`
+- [x] `@@unique([tenantId, id])` e `@@index([tenantId, requestedById])`
 
 ### `AuditLog`
 
-- [ ] `@@index([tenantId, createdAt])`
+- [x] `@@index([tenantId, createdAt])`
 
 ### Verificação
 
-- [ ] `npm run prisma:migrate` gera **uma** migration
-- [ ] `npm run prisma:generate` e `npm run typecheck`
-- [ ] `npm run test:int` — suítes de tenancy existentes continuam verdes
-- [ ] `test/integration/ticket-numbering.int-spec.ts` — N creates concorrentes produzem N números
+- [x] Uma única migration gerada (`20260829131500_helpdesk_domain`), aplicada e conferida com
+      `npx prisma migrate status`
+- [x] `npm run prisma:generate` e `npm run typecheck`
+- [x] `npm run test:int` — suítes de tenancy existentes continuam verdes
+- [x] `test/integration/ticket-numbering.int-spec.ts` — N creates concorrentes produzem N números
       distintos e sequenciais, sem buraco e sem repetição
+
+### Não estava no plano
+
+- [x] `test/integration/tenant-isolation.int-spec.ts` teve de ganhar `number` em seis
+      fixtures de ticket. Metade delas usa `as Parameters<typeof prisma.ticket.create>[0]`,
+      então o `typecheck` passou e a falta só apareceu como erro de runtime do Prisma —
+      lembrete de que aquele cast desliga a checagem que teria pego isso na hora
+- [x] O backfill cobre também o tenant reservado da plataforma, que nunca terá chamado. Uma
+      linha inútil custa menos que um caso especial no código que lê o contador. Num banco
+      novo ele simplesmente não ganha contador, e nada lê
+- [x] A migration foi gerada com `prisma migrate diff --from-config-datasource --to-schema` e
+      aplicada com `migrate deploy`, e não com `npm run prisma:migrate`: o `migrate dev` é
+      interativo e aborta aqui com "non-interactive environment" ao pedir confirmação do aviso
+      sobre a unique nova em `tickets`. O SQL é o mesmo; o backfill foi acrescentado à mão ao fim
+      do arquivo, que é a única parte que o `diff` não teria como inferir
 
 ---
 

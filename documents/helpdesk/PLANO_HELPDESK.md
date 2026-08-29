@@ -4,16 +4,16 @@
 > [`CHECKLIST_HELPDESK.md`](./CHECKLIST_HELPDESK.md); o conhecimento medido que sobreviver à
 > implementação vai para [`important/HELPDESK.md`](../important/HELPDESK.md).
 >
-> | Fase                         | Estado         | Commit |
-> | ---------------------------- | -------------- | ------ |
-> | 0 — Branch e documentos      | 🚧 em execução | —      |
-> | 1 — Schema e migration       | ⏳ pendente    | —      |
-> | 2 — Módulo `tickets`         | ⏳ pendente    | —      |
-> | 3 — Comentários              | ⏳ pendente    | —      |
-> | 4 — Trilha de auditoria      | ⏳ pendente    | —      |
-> | 5 — Fila BullMQ e relatórios | ⏳ pendente    | —      |
-> | 6 — WebSocket                | ⏳ pendente    | —      |
-> | 7 — Documentação final       | ⏳ pendente    | —      |
+> | Fase                         | Estado       | Commit    |
+> | ---------------------------- | ------------ | --------- |
+> | 0 — Branch e documentos      | ✅ concluída | `c47c4f9` |
+> | 1 — Schema e migration       | ✅ concluída | —         |
+> | 2 — Módulo `tickets`         | ⏳ pendente  | —         |
+> | 3 — Comentários              | ⏳ pendente  | —         |
+> | 4 — Trilha de auditoria      | ⏳ pendente  | —         |
+> | 5 — Fila BullMQ e relatórios | ⏳ pendente  | —         |
+> | 6 — WebSocket                | ⏳ pendente  | —         |
+> | 7 — Documentação final       | ⏳ pendente  | —         |
 >
 > As seções das fases concluídas ganham uma nota **Como saiu** ao final, com os desvios em relação
 > ao que estava planejado e os defeitos encontrados durante a execução.

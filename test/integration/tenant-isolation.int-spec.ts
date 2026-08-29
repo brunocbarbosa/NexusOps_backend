@@ -44,6 +44,10 @@ describe('tenant isolation (schema layer)', () => {
       const ticket = await prisma.ticket.create({
         data: {
           tenantId: tenant.id,
+          // One ticket per tenant here, so the per-tenant sequence starts and
+          // ends at 1. The counter is not involved: this suite builds fixtures
+          // with a bare client on purpose.
+          number: 1,
           requesterId: user.id,
           title: `Ticket of tenant ${label}`,
         },
@@ -180,6 +184,7 @@ describe('tenant isolation (extension)', () => {
       const ticket = await base.ticket.create({
         data: {
           tenantId: tenant.id,
+          number: 1,
           requesterId: user.id,
           title: `Ticket of ${label}`,
         },
@@ -241,7 +246,9 @@ describe('tenant isolation (extension)', () => {
   it('stamps the tenant on create without the caller supplying it', async () => {
     const created = await runWithTenant(tenantA, () =>
       prisma.ticket.create({
-        data: { requesterId: userA, title: 'stamped' },
+        // Numbers are handed out by hand here: the counter belongs to the
+        // service, and this suite is about the extension.
+        data: { number: 2, requesterId: userA, title: 'stamped' },
       } as Parameters<typeof prisma.ticket.create>[0]),
     );
     expect(created.tenantId).toBe(tenantA);
@@ -252,7 +259,12 @@ describe('tenant isolation (extension)', () => {
     await expect(
       runWithTenant(tenantA, () =>
         prisma.ticket.create({
-          data: { tenantId: tenantB, requesterId: userB, title: 'smuggled' },
+          data: {
+            tenantId: tenantB,
+            number: 1,
+            requesterId: userB,
+            title: 'smuggled',
+          },
         }),
       ),
     ).rejects.toBeInstanceOf(CrossTenantWriteError);
@@ -280,7 +292,7 @@ describe('tenant isolation (extension)', () => {
       expect(updated.count).toBe(1);
 
       const spare = await prisma.ticket.create({
-        data: { requesterId: userA, title: 'disposable' },
+        data: { number: 3, requesterId: userA, title: 'disposable' },
       } as Parameters<typeof prisma.ticket.create>[0]);
       const deleted = await prisma.ticket.deleteMany({
         where: { id: spare.id },
@@ -290,7 +302,7 @@ describe('tenant isolation (extension)', () => {
       // Upserting another tenant's id must not touch that tenant's row.
       await prisma.ticket.upsert({
         where: { id: ticketB },
-        create: { requesterId: userA, title: 'upserted' },
+        create: { number: 5, requesterId: userA, title: 'upserted' },
         update: { title: 'hijacked' },
       } as Parameters<typeof prisma.ticket.upsert>[0]);
     });
@@ -332,6 +344,7 @@ describe('tenant isolation (extension)', () => {
     const ticket = await runWithTenant(tenantA, () =>
       prisma.ticket.create({
         data: {
+          number: 4,
           requesterId: userA,
           title: 'with a comment',
           comments: { create: [{ authorId: userA, body: 'nested' }] },
