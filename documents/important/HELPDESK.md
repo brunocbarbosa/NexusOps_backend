@@ -184,7 +184,42 @@ report, and closing is an administrative act that happens afterwards.
 
 ### `CommentResponse`
 
-_Written in Fase 3._
+The thread inside a ticket. Both routes hang off the ticket, and both resolve it first — a ticket
+you cannot see 404s before a comment is read or written.
+
+| Method | Path                          | Auth | Success | Purpose            |
+| ------ | ----------------------------- | ---- | ------- | ------------------ |
+| `POST` | `/tickets/:ticketId/comments` | any  | `201`   | add to the thread  |
+| `GET`  | `/tickets/:ticketId/comments` | any  | `200`   | read it, paginated |
+
+`GET` takes `page` and `perPage` only. There is deliberately **no `includeInternal`**: who sees the
+internal notes is decided by the caller's role, and a filter would be a filter a requester could
+flip. Comments come oldest first — a thread is read from the top down, unlike the ticket list.
+
+```ts
+type CommentResponse = {
+  id: string;
+  ticketId: string;
+  body: string;
+  isInternal: boolean;
+  author: UserResponse;
+  createdAt: string;
+};
+```
+
+**The internal note.** `isInternal: true` is the note the customer is not meant to read. Only an
+`ADMIN` or an `AGENT` can write one — a `REQUESTER` asking for one gets `403`, not `404`, because
+the ticket is theirs and visible and what is missing is only the role.
+
+For a `REQUESTER` the notes are filtered out of the page **and out of `meta.total`**. A total that
+counted rows they cannot read would announce that something is being hidden, which is most of what
+hiding it was for.
+
+**Comments are append-only.** There is no `PATCH` and no `DELETE`; both answer `404` because the
+routes do not exist. The thread is what the audit trail renders as a timeline, and a timeline whose
+entries can be rewritten is not one.
+
+**A closed ticket takes no new comments** — `409` — but stays readable. Frozen, not hidden.
 
 ### `ReportResponse`
 
@@ -314,6 +349,37 @@ by accident.
 
 The alternative — dropping `include` and resolving the three users separately — was rejected: it
 trades a warning about a future major for an N+1 on every list screen today.
+
+### `enableImplicitConversion` converts a JSON body too, not only a query string
+
+[`USERS.md`](./USERS.md) records that `Boolean('false')` is `true` and that the global pipe's
+implicit conversion runs before `@Transform`, so a query-string flag needs
+`@Type(() => String)` to survive. That write-up frames it as a query-string problem, because that
+is where every value arrives as text.
+
+Measured here: **it is not.** The pipe converts by the property's _declared_ type, not by the
+value's, so it does the same thing to a JSON body. `CreateCommentDto` was written with a plain
+`@IsBoolean()` on `isInternal`, with a comment claiming a body needs no conversion machinery. The
+e2e suite disproved it: `{"isInternal": "yes"}` was converted to `true`, passed `@IsBoolean()`, and
+reached the service as a genuine request for an internal note.
+
+`"yes"` is the harmless version. `"false"` is the one that matters: a client asking for a **visible**
+comment would have got a hidden one.
+
+The fix is the same three decorators, and `src/comments/dto/create-comment.dto.spec.ts` pins it with
+`type: 'body'` rather than `type: 'query'` — which is the part that makes it a different test from
+the one in `users`.
+
+**The same defect was already shipped in `UpdateCompanyDto.isActive`**, found by grepping for
+`@IsBoolean` after this one turned up. `PATCH /platform/companies/:companyId` with
+`{"isActive": "false"}` **reactivated** the company the caller was asking to suspend, answered
+`200`, and left nothing to notice. `{"isActive": "maybe"}` and `{"isActive": 0}` were accepted too.
+Proved with a failing spec before the fix, and fixed in the same commit.
+
+The rule that falls out: **any `@IsBoolean()` in this codebase needs the three decorators**, whether
+it reads from a query string or from a body. `@IsInt()` does not — implicit conversion of a numeric
+string is what makes the query DTOs work at all, and a non-numeric string fails the validator
+honestly.
 
 ### Whether the tenant context survives an event-emitter `emit`
 

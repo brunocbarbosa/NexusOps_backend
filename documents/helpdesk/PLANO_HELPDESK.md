@@ -8,8 +8,8 @@
 > | ---------------------------- | ------------ | --------- |
 > | 0 — Branch e documentos      | ✅ concluída | `c47c4f9` |
 > | 1 — Schema e migration       | ✅ concluída | `548e5ce` |
-> | 2 — Módulo `tickets`         | ✅ concluída | —         |
-> | 3 — Comentários              | ⏳ pendente  | —         |
+> | 2 — Módulo `tickets`         | ✅ concluída | `1c1c2c1` |
+> | 3 — Comentários              | ✅ concluída | —         |
 > | 4 — Trilha de auditoria      | ⏳ pendente  | —         |
 > | 5 — Fila BullMQ e relatórios | ⏳ pendente  | —         |
 > | 6 — WebSocket                | ⏳ pendente  | —         |

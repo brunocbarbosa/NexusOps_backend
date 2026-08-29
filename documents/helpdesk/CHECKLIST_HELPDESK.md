@@ -26,8 +26,8 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 | PR  | Branch                         | Fases | Estado         |
 | --- | ------------------------------ | ----- | -------------- |
-| 1   | `feat/helpdesk-tickets`        | 0–2   | 🚧 em execução |
-| 2   | `feat/helpdesk-comments-audit` | 3–4   | ⏳ pendente    |
+| 1   | `feat/helpdesk-tickets`        | 0–2   | ✅ concluída   |
+| 2   | `feat/helpdesk-comments-audit` | 3–4   | 🚧 em execução |
 | 3   | `feat/helpdesk-async`          | 5–6   | ⏳ pendente    |
 | 4   | `docs/helpdesk-reference`      | 7     | ⏳ pendente    |
 
@@ -195,17 +195,34 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 3 — Comentários
 
-- [ ] `src/comments/` com controller em `tickets/:ticketId/comments`
-- [ ] `POST` → `201`; `isInternal: true` só de `ADMIN`/`AGENT`, senão `403`
-- [ ] `GET` paginado; para `REQUESTER` o where ganha `isInternal: false` e o `total` também
-- [ ] Ticket pai resolvido por `TicketsService.load()` antes de qualquer coisa
-- [ ] `CommentsModule` importa `TicketsModule` e é registrado em `src/app.module.ts`
+- [x] `src/comments/` com controller em `tickets/:ticketId/comments`
+- [x] `POST` → `201`; `isInternal: true` só de `ADMIN`/`AGENT`, senão `403`
+- [x] `GET` paginado; para `REQUESTER` o where ganha `isInternal: false` e o `total` também
+- [x] Ticket pai resolvido por `TicketsService.load()` antes de qualquer coisa
+- [x] `CommentsModule` importa `TicketsModule` e é registrado em `src/app.module.ts`
 
 ### Verificação
 
-- [ ] `npm run test:unit` — spec do service
-- [ ] `test/e2e/comments.e2e-spec.ts` — nota interna invisível para o requester, e 404 em ticket de
+- [x] `npm run test:unit` — spec do service
+- [x] `test/e2e/comments.e2e-spec.ts` — nota interna invisível para o requester, e 404 em ticket de
       outro tenant
+
+### Não estava no plano
+
+- [x] `src/comments/dto/create-comment.dto.spec.ts` — o e2e provou que a armadilha do
+      `enableImplicitConversion` **também vale para corpo JSON**, não só query string:
+      `{"isInternal": "yes"}` virava `true` e chegava ao service como pedido real de nota interna.
+      O comentário que eu tinha escrito no DTO afirmava exatamente o contrário. Corrigido com os
+      três decorators e um spec com `type: 'body'`
+- [x] **Bug encontrado em código já entregue:** `UpdateCompanyDto.isActive` tinha o mesmo defeito.
+      `PATCH /platform/companies/:companyId` com `{"isActive": "false"}` **reativava** a empresa que
+      o chamador pedia para suspender, respondia 200 e não deixava rastro. Provado com um spec que
+      falhava antes da correção (`src/platform/dto/update-company.dto.spec.ts`) e corrigido aqui
+- [x] `src/comments/internal-notes.ts` — predicado próprio em vez de reusar `seesEveryTicket()`.
+      Os corpos são idênticos hoje, mas "vê todos os chamados" e "lê a nota que o cliente não deve
+      ver" são perguntas diferentes, e responder a segunda chamando a primeira amarra as duas
+- [x] Comentar num chamado `CLOSED` responde 409. Não estava especificado; segue a mesma regra de
+      que um chamado fechado é registro — continua legível, não recebe escrita
 
 ---
 
