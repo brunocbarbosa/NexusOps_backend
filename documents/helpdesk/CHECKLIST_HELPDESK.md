@@ -314,19 +314,41 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 6 — WebSocket
 
-- [ ] `src/realtime/` — `notifications.gateway.ts` e `realtime.module.ts`
-- [ ] Handshake valida o token de acesso; inválido leva a `disconnect()`
-- [ ] Salas `user:<userId>` e `tenant:<tenantId>:staff` (só `ADMIN` e `AGENT`)
-- [ ] `report.completed` / `report.failed` → `user:<id>`
-- [ ] `ticket.created` / `ticket.updated` / `comment.created` → `tenant:<id>:staff` e
+- [x] `src/realtime/` — `notifications.gateway.ts` e `realtime.module.ts`
+- [x] Handshake valida o token de acesso; inválido leva a `disconnect()`
+- [x] Salas `user:<userId>` e `tenant:<tenantId>:staff` (só `ADMIN` e `AGENT`)
+- [x] `report.completed` / `report.failed` → `user:<id>`
+- [x] `ticket.created` / `ticket.updated` / `comment.created` → `tenant:<id>:staff` e
       `user:<requesterId>`
-- [ ] O gateway consome os eventos do `EventEmitter2` — nenhum service conhece o gateway
+- [x] O gateway consome os eventos do `EventEmitter2` — nenhum service conhece o gateway
 
 ### Verificação
 
-- [ ] `test/e2e/realtime.e2e-spec.ts` com `socket.io-client` real: recebe o próprio evento, não
+- [x] `test/e2e/realtime.e2e-spec.ts` com `socket.io-client` real: recebe o próprio evento, não
       recebe o de outro tenant, e um `REQUESTER` não recebe evento de chamado alheio
-- [ ] `npm run test:all`
+- [x] `npm run test:all`
+
+### Não estava no plano
+
+- [x] O contrato dos eventos saiu de `src/audit/audit.events.ts` para `src/events/ticket-events.ts`.
+      Com dois consumidores, deixá-lo no módulo de auditoria faria `src/realtime/` importar de
+      `src/audit/` — uma dependência que não existe: nenhum dos dois conhece o outro, os dois
+      conhecem o contrato
+- [x] `requesterId` acrescentado ao payload do evento. Sem ele o gateway teria de ler o banco a
+      cada evento, num listener que não tem escopo de requisição para ler dentro
+- [x] `JwtModule` passou a ser exportado pelo `AuthModule`. O handshake verifica o mesmo token de
+      acesso do lado HTTP, e um segundo `JwtModule` no `RealtimeModule` seria um segundo lugar para
+      manter segredo e expiração em sincronia
+- [x] O worker de relatório passou a emitir `report.completed` / `report.failed`, **depois** de
+      gravar a linha — assim um cliente acordado pelo socket lê o relatório já pronto em vez de
+      correr com o update que o acordou
+- [x] `socket.io-client` adicionado como devDependency; não havia cliente para testar o gateway
+- [x] O `createTestApp` só chama `init()`, então a suíte de realtime precisa de `app.listen(0)` —
+      é a única do tier que sobe servidor de verdade
+- [x] **Investigado e não silenciado:** rodando sozinha, a suíte imprime o "Jest did not exit" do
+      Jest. Dump de `process._getActiveHandles()` após o teardown deixa exatamente dois `Socket`
+      sem endereço — `stdout` e `stderr`, que o Jest encana e que _são_ `net.Socket`. Não há nada
+      a fechar, e o tier completo sai limpo
 
 ---
 

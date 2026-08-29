@@ -1,7 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
+import { REPORT_EVENTS } from '../events/report-events';
+import type { ReportEvent } from '../events/report-events';
 import { ReportStatus } from '../generated/prisma/enums';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
@@ -39,6 +42,7 @@ export class ReportsProcessor extends WorkerHost {
   constructor(
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
     private readonly tickets: TicketsService,
+    private readonly events: EventEmitter2,
     config: ConfigService,
   ) {
     super();
@@ -64,6 +68,14 @@ export class ReportsProcessor extends WorkerHost {
             error: null,
           },
         });
+
+        this.announce(REPORT_EVENTS.Completed, {
+          tenantId: actor.tenantId,
+          reportId,
+          requestedById: actor.id,
+          rowCount: rows.length,
+          error: null,
+        });
       } catch (error) {
         // The failure is recorded on the row rather than only thrown, because
         // the client is polling that row: a job that dies silently leaves a
@@ -78,6 +90,14 @@ export class ReportsProcessor extends WorkerHost {
             error: message,
             completedAt: new Date(),
           },
+        });
+
+        this.announce(REPORT_EVENTS.Failed, {
+          tenantId: actor.tenantId,
+          reportId,
+          requestedById: actor.id,
+          rowCount: null,
+          error: message,
         });
 
         this.logger.error(
@@ -118,6 +138,15 @@ export class ReportsProcessor extends WorkerHost {
     }
 
     return rows.slice(0, this.maxRows);
+  }
+
+  /**
+   * Announces the outcome. Emitted **after** the row is written, so a client
+   * woken by the socket and reading the report immediately finds it settled
+   * rather than racing the update that caused the notification.
+   */
+  private announce(name: string, event: ReportEvent): void {
+    this.events.emit(name, event);
   }
 
   private async setStatus(

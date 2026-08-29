@@ -6,7 +6,7 @@ import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { tenantScoped } from '../tenancy/tenant-scoped';
 import { TicketsService } from '../tickets/tickets.service';
 import { AuditResponse, AUDIT_ACTOR, toAuditResponse } from './audit-response';
-import { AuditEvent, STAFF_ONLY_ACTIONS } from './audit.events';
+import { TicketEvent, STAFF_ONLY_ACTIONS } from '../events/ticket-events';
 import { handlesInternalNotes } from '../comments/internal-notes';
 import { QueryAuditDto } from './dto/query-audit.dto';
 
@@ -33,7 +33,7 @@ export class AuditService {
    * Appends one entry. Expects a tenant scope to be open already — the listener
    * opens it from the event payload.
    */
-  async record(event: AuditEvent): Promise<void> {
+  async record(event: TicketEvent): Promise<void> {
     await this.prisma.auditLog.create({
       data: tenantScoped({
         userId: event.actorId,

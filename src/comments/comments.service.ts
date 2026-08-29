@@ -9,8 +9,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITIES,
   auditEventName,
-} from '../audit/audit.events';
-import type { AuditEvent } from '../audit/audit.events';
+} from '../events/ticket-events';
+import type { TicketEvent } from '../events/ticket-events';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
 import { Prisma } from '../generated/prisma/client';
 import { TicketStatus } from '../generated/prisma/enums';
@@ -92,9 +92,10 @@ export class CommentsService {
     // out somebody replied would not be a timeline. `internal_note_added` is a
     // distinct action rather than a flag in the payload so that hiding it from
     // a requester stays a plain column comparison.
-    const event: AuditEvent = {
+    const event: TicketEvent = {
       tenantId: author.tenantId,
       actorId: author.id,
+      requesterId: ticket.requesterId,
       entityType: AUDIT_ENTITIES.Ticket,
       entityId: ticket.id,
       action: comment.isInternal

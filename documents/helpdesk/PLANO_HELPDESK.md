@@ -11,8 +11,8 @@
 > | 2 — Módulo `tickets`         | ✅ concluída | `1c1c2c1` |
 > | 3 — Comentários              | ✅ concluída | `4c28670` |
 > | 4 — Trilha de auditoria      | ✅ concluída | `8032196` |
-> | 5 — Fila BullMQ e relatórios | ✅ concluída | —         |
-> | 6 — WebSocket                | ⏳ pendente  | —         |
+> | 5 — Fila BullMQ e relatórios | ✅ concluída | `600810f` |
+> | 6 — WebSocket                | ✅ concluída | —         |
 > | 7 — Documentação final       | ⏳ pendente  | —         |
 >
 > As seções das fases concluídas ganham uma nota **Como saiu** ao final, com os desvios em relação

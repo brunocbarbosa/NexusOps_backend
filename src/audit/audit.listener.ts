@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { runWithTenant } from '../tenancy/tenant-context';
-import { AUDIT_EVENT_PATTERN } from './audit.events';
-import type { AuditEvent } from './audit.events';
+import { TICKET_EVENT_PATTERN } from '../events/ticket-events';
+import type { TicketEvent } from '../events/ticket-events';
 import { AuditService } from './audit.service';
 
 /**
@@ -26,8 +26,8 @@ import { AuditService } from './audit.service';
 export class AuditListener {
   private readonly logger = new Logger(AuditListener.name);
 
-  @OnEvent(AUDIT_EVENT_PATTERN)
-  async handle(event: AuditEvent): Promise<void> {
+  @OnEvent(TICKET_EVENT_PATTERN)
+  async handle(event: TicketEvent): Promise<void> {
     try {
       await runWithTenant(event.tenantId, () => this.audit.record(event));
     } catch (error) {

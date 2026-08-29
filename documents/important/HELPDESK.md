@@ -331,6 +331,53 @@ is prefixed with a single quote. The first is RFC 4180 and means a ticket title 
 survives; the second is because spreadsheets execute a leading `=` as a formula, which would turn a
 ticket title into an injection against whoever opens the file. Line endings are CRLF.
 
+### The notification socket
+
+A socket.io endpoint on the same origin as the API. It pushes; it accepts no commands.
+
+**The handshake carries the access token in `auth`, not in a header** — the browser `WebSocket` API
+cannot set headers, and socket.io's `auth` field is the supported way through:
+
+```ts
+const socket = io('https://api.example.com', {
+  auth: { token: accessToken },
+});
+```
+
+The server answers with `ready` (`{ userId, role }`) on success, or `unauthorized`
+(`{ message }`) followed by a disconnect. A refresh token is refused: the two are signed with
+different keys.
+
+The token expires long before a tab is closed, so a client has to reconnect with a fresh one after a
+refresh. **Set `reconnection: false` if you do not**, or a socket refused for an expired token
+retries forever.
+
+| Event              | Sent to                                                | Payload                                               |
+| ------------------ | ------------------------------------------------------ | ----------------------------------------------------- |
+| `ready`            | the socket that just connected                         | `{ userId, role }`                                    |
+| `unauthorized`     | a socket about to be disconnected                      | `{ message }`                                         |
+| `ticket.changed`   | staff of the company, and the requester of that ticket | `{ ticketId, action, actorId, oldValues, newValues }` |
+| `report.completed` | only whoever requested it                              | `{ reportId, rowCount, error: null }`                 |
+| `report.failed`    | only whoever requested it                              | `{ reportId, rowCount: null, error }`                 |
+
+`ticket.changed` carries the same `action` vocabulary as the timeline, so a client can reuse one
+renderer for both.
+
+**Two rooms, and they are the whole access-control story.** A connection joins `user:<id>` always,
+and `tenant:<id>:staff` only if it is an `ADMIN` or an `AGENT`. Broadcasting to a plain per-tenant
+room would hand a `REQUESTER` every ticket in the company over the socket — with no controller
+involved to refuse it, and nothing in the HTTP tests to notice.
+
+**`internal_note_added` goes to staff only.** The whole point of it being a separate action is that
+the customer never learns the note exists, and that has to hold on the socket as much as on the
+timeline.
+
+A report notification is addressed to one person, never to a room: the file was built through its
+requester's own visibility, so its very existence is theirs.
+
+**The event is emitted after the row is written**, so a client woken by `report.completed` can
+download immediately rather than racing the update that woke it.
+
 ### The error catalogue
 
 _Written once every route exists, with real bodies captured from the running application._
@@ -650,4 +697,55 @@ land in a customer's spreadsheet rather than failing to compile.
 
 ### The staff room is what keeps a requester out of another ticket's events
 
-_Fase 6._
+Three phases went into making a `REQUESTER` unable to read somebody else's ticket over HTTP. A
+gateway that broadcast every change to `tenant:<id>` would hand it to them anyway, over a socket,
+with no controller involved to refuse it — and **not one HTTP test would fail**. The visibility rule
+has to be re-established at this boundary, because the boundary is new.
+
+So a connection joins `user:<id>` and, only if it is staff, `tenant:<id>:staff`. A ticket event goes
+to the staff room and to `user:<requesterId>`; socket.io de-duplicates, so an agent who opened the
+ticket themselves still receives it once. `internal_note_added` skips the requester entirely.
+
+`test/e2e/realtime.e2e-spec.ts` connects four real clients — an agent, the ticket's requester,
+another requester of the same company, and a requester of a different company — and asserts the last
+two hear **nothing**. The negative assertion is the one worth having; the positive ones would pass
+against a broadcast to everybody.
+
+`requesterId` rides in the event payload for this. Looking it up in the gateway would mean a database
+read per event, on a listener with no request scope to read it in.
+
+### The gateway re-reads the role, for the same reason `JwtStrategy` does
+
+A socket outlives an access token's fifteen minutes by hours. Trusting the `role` claim would leave
+an agent demoted — or deactivated — after connecting sitting in the staff room for as long as they
+keep the tab open, receiving every ticket in the company.
+
+So the handshake verifies the token, then opens a tenant scope by hand and reads the user row, the
+same shape `JwtStrategy.validate()` uses and for the same reason. **A gateway has no HTTP request**,
+so nothing here inherits a scope — the third place in this codebase where that is true, after the
+audit listener and the report worker.
+
+The event handlers need no scope at all: routing to a room is string work and never touches the
+database. That is why `rooms.ts` holds functions rather than template literals at four call sites —
+a typo in a hand-written room name is a socket that silently receives nothing.
+
+### The event contract moved out of `src/audit/`
+
+`ticket.*` had one consumer when it was written and has two now. Leaving its definition in
+`src/audit/audit.events.ts` would have made `src/realtime/` import from `src/audit/`, which reads as
+a dependency that does not exist: neither module knows the other, and both know the contract. It
+lives in `src/events/` for the same reason `src/tenancy/` is not inside `src/users/`.
+
+### Jest's "did not exit" on this suite is stdout, not a leak
+
+Run on its own, `realtime.e2e-spec.ts` prints Jest's "did not exit one second after the test run has
+completed". It was chased rather than silenced: dumping `process._getActiveHandles()` after teardown
+leaves exactly two `Socket` objects with no address, which are `stdout` and `stderr` — Jest pipes
+them, and a piped stdio stream _is_ a `net.Socket`. There is nothing left to close, and the full
+tier exits clean.
+
+Two things were kept from the investigation because they are correct regardless: the suite closes
+its clients with `reconnection: false` (a refused handshake otherwise retries forever, which really
+would hold the loop open), and it calls `closeAllConnections()` on the server, since it is the only
+e2e suite that calls `app.listen()` and therefore the only one with keep-alive connections to
+release.

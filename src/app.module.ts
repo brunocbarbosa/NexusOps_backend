@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { CommentsModule } from './comments/comments.module';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { ReportsModule } from './reports/reports.module';
 import { PlatformModule } from './platform/platform.module';
 import { TicketsModule } from './tickets/tickets.module';
@@ -50,6 +51,7 @@ import { UsersModule } from './users/users.module';
     CommentsModule,
     AuditModule,
     ReportsModule,
+    RealtimeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

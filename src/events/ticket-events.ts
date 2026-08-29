@@ -1,5 +1,11 @@
 /**
- * The events the domain emits and the audit trail listens for.
+ * The events a ticket change emits, and the contract its listeners read.
+ *
+ * This lives in `src/events/` rather than inside `src/audit/` because it has
+ * two consumers now — the audit trail and the notification gateway — and
+ * neither depends on the other. Leaving it in the audit module would make
+ * `src/realtime/` import from `src/audit/`, which reads as a dependency that
+ * does not exist.
  *
  * Business logic never calls `AuditService`. It emits, and something else
  * decides what that is worth recording — the Observer the CLAUDE.md
@@ -48,10 +54,20 @@ export const STAFF_ONLY_ACTIONS: readonly AuditAction[] = [
   AUDIT_ACTIONS.InternalNoteAdded,
 ];
 
-export type AuditEvent = {
+export type TicketEvent = {
   tenantId: string;
   /** Who did it. Null only for something the system did on its own. */
   actorId: string | null;
+  /**
+   * Who opened the ticket.
+   *
+   * Carried for the notification gateway rather than for the trail, which
+   * never reads it: staff hear about every ticket in the company, and the
+   * requester is the one person outside staff who should hear about this one.
+   * Looking it up in the gateway instead would mean a database read per event,
+   * on a listener that has no request scope to read it in.
+   */
+  requesterId: string;
   entityType: AuditEntity;
   entityId: string;
   action: AuditAction;
@@ -72,5 +88,5 @@ export function auditEventName(
   return `${entityType.toLowerCase()}.${action}`;
 }
 
-/** What the listener subscribes to. Requires `wildcard: true` on the module. */
-export const AUDIT_EVENT_PATTERN = 'ticket.*';
+/** What the listeners subscribe to. Requires `wildcard: true` on the module. */
+export const TICKET_EVENT_PATTERN = 'ticket.*';

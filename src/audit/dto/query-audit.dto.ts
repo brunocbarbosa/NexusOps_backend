@@ -1,7 +1,7 @@
 import { Transform } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
-import { AUDIT_ACTIONS } from '../audit.events';
-import type { AuditAction } from '../audit.events';
+import { AUDIT_ACTIONS } from '../../events/ticket-events';
+import type { AuditAction } from '../../events/ticket-events';
 
 const ACTIONS = Object.values(AUDIT_ACTIONS);
 

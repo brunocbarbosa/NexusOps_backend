@@ -10,9 +10,9 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ENTITIES,
   AuditAction,
-  AuditEvent,
+  TicketEvent,
   auditEventName,
-} from '../audit/audit.events';
+} from '../events/ticket-events';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
 import { Prisma } from '../generated/prisma/client';
 import { TicketStatus, UserRole } from '../generated/prisma/enums';
@@ -119,7 +119,7 @@ export class TicketsService {
     });
 
     const response = toTicketResponse(ticket);
-    this.emit(requester, response.id, {
+    this.emit(requester, response.id, response.requester.id, {
       action: AUDIT_ACTIONS.Created,
       oldValues: {},
       newValues: {
@@ -411,7 +411,7 @@ export class TicketsService {
     // After the transaction, never inside it. An event emitted from within the
     // callback would announce a change that a later statement could still roll
     // back, and the trail would record something that never happened.
-    this.emit(requester, after.id, audit(before, after));
+    this.emit(requester, after.id, before.requesterId, audit(before, after));
 
     return after;
   }
@@ -427,11 +427,13 @@ export class TicketsService {
   private emit(
     actor: AuthenticatedUser,
     ticketId: string,
+    requesterId: string,
     change: AuditChange,
   ): void {
-    const event: AuditEvent = {
+    const event: TicketEvent = {
       tenantId: actor.tenantId,
       actorId: actor.id,
+      requesterId,
       entityType: AUDIT_ENTITIES.Ticket,
       entityId: ticketId,
       action: change.action,
