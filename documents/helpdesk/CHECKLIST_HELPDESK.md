@@ -354,26 +354,43 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 7 — Documentação final
 
-- [ ] `documents/important/HELPDESK.md` Parte I completa, com payloads **capturados da aplicação
+- [x] `documents/important/HELPDESK.md` Parte I completa, com payloads **capturados da aplicação
       rodando**, não deduzidos dos tipos
-- [ ] `documents/important/HELPDESK.md` Parte II com as medições da execução
-- [ ] `documents/helpdesk/GUIA_FRONTEND_HELPDESK.md`
-- [ ] `CLAUDE.md` — índice, parágrafo do catálogo, ponteiro no bloco de OCC, e correção da frase que
+- [x] `documents/important/HELPDESK.md` Parte II com as medições da execução
+- [x] `documents/helpdesk/GUIA_FRONTEND_HELPDESK.md`
+- [x] `CLAUDE.md` — índice, parágrafo do catálogo, ponteiro no bloco de OCC, e correção da frase que
       afirma que nada disso foi escrito
-- [ ] `README.md` da raiz — tabela de documentos e roadmap
-- [ ] Este checklist fechado, com o commit de cada fase
+- [x] `README.md` da raiz — tabela de documentos e roadmap
+- [x] Este checklist fechado, com o commit de cada fase
 
 ### Verificação
 
-- [ ] `npm run format:check`
-- [ ] Links relativos conferidos um a um
-- [ ] Percurso manual de ponta a ponta do `PLANO_HELPDESK.md` executado numa base limpa
+- [x] `npm run format:check`
+- [x] Links relativos conferidos um a um
+- [x] Percurso manual de ponta a ponta do `PLANO_HELPDESK.md` executado numa base limpa
+
+### Não estava no plano
+
+- [x] Os payloads foram capturados por um script (`fetch` contra a app compilada rodando no stack de
+      teste na 3399), não copiados dos tipos: abrir empresa, usuários, chamado, atribuir, mudar
+      status, comentar público e interno, ler timeline e feed, pedir e baixar relatório, e provocar
+      cada erro do catálogo. O tenant de captura foi apagado depois
+- [x] A captura revelou um detalhe que valia documentar: `oldValues` é `{}` em `created` e `null` em
+      `commented`. São valores diferentes no banco (`{}` gravado contra `DbNull`) e a API não os
+      uniformiza
+- [x] `README.md` afirmava "Project documentation is written in Portuguese", o que deixou de ser
+      verdade no PR #29. Corrigido para descrever a divisão real: `important/` em inglês, o resto em
+      português
+- [x] Blocos de Architecture do `CLAUDE.md` que descreviam auditoria, fila e WebSocket no futuro
+      foram reescritos para o presente, cada um com a armadilha que a fase mediu
 
 ---
 
-## Não estava no plano
+## Encerramento
 
-Itens que apareceram durante a execução e não estavam previstos. Cada um anotado com a razão de ter
-surgido.
+As oito fases estão concluídas. Os desvios de cada uma ficaram registrados na seção
+**Não estava no plano** da própria fase, que é onde eles são úteis — junto do que estava previsto.
 
-- _(vazio por enquanto)_
+O conhecimento medido durante a execução foi para
+[`important/HELPDESK.md`](../important/HELPDESK.md); este arquivo é o registro de execução e pode
+ser apagado quando a feature deixar de ser assunto, como foram os checklists de `users` e de CI/CD.

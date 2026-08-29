@@ -15,8 +15,12 @@ there.
 `src/users/` are the first vertical built on it, `src/platform/` is the second — the single
 `ADMIN_MASTER` and the CRUDs it drives — and `src/prisma/` plus `src/config/` are what
 connect the tenancy layer to Nest at all. `src/app.*` is still the scaffold, kept because the
-`docker` job in CI uses `GET /` as its liveness probe. Tickets, comments, the audit trail, the
-BullMQ queues and the WebSocket gateway are not written yet.
+`docker` job in CI uses `GET /` as its liveness probe.
+
+The helpdesk is written: `src/tickets/` and `src/comments/` are the domain, `src/audit/` is the
+event-driven trail, `src/reports/` is the BullMQ export and `src/realtime/` is the notification
+gateway, with the event contract they share in `src/events/`. Row-Level Security is the one thing
+from the original architecture that is still missing.
 
 Other documents, by purpose:
 
@@ -41,8 +45,10 @@ operator, in the same two parts: the company and company-user API a console inte
 the measured behaviour behind it — why the operator lives in a reserved tenant, why `isPlatform` is
 `Boolean?`, and the escalation the new enum value opened; read it before editing `src/platform/`),
 `HELPDESK.md` (the helpdesk slice — tickets, comments, the audit trail, the report queue and the
-notification gateway — in the same two parts; **still being written**, one pull request at a time,
-so an empty section there means not-yet rather than nothing-to-say) and `RLS_NOTES.md` (Row-Level
+notification gateway — in the same two parts: the API contract a client integrates against, with
+payloads captured from the running application, and the measured behaviour behind it; read it
+before editing `src/tickets/`, `src/comments/`, `src/audit/`, `src/reports/`, `src/realtime/` or
+`src/events/`) and `RLS_NOTES.md` (Row-Level
 Security, **not implemented yet**: the four steps that remain and how to check whether it is
 actually enforcing anything, plus the two traps measured here). They live together so that detail nobody needs today
 does not get lost.
@@ -316,17 +322,51 @@ catalogue — and is what a client integrates against without reading the source
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
 overwrite. Any new mutable aggregate needs the same guard.
 
+`TicketsService.mutate()` is the chokepoint that implements it, and every ticket mutation goes
+through it: `updateMany({ where: { id, version } })` and never `update`, because `{ id, version }`
+is not a unique key, with `count === 0` as the conflict. The read and the write share one
+interactive transaction so that 404 and 409 stay distinguishable.
+
+Why that is forced rather than chosen, how per-tenant ticket numbers are handed out without a race,
+whether the tenant context survives an `emit`, why the audit write lands outside the mutation's
+transaction, and why the WebSocket staff room is what keeps a requester out of another ticket's
+events are in **`documents/important/HELPDESK.md`**, Part II. Part I is the API contract for the
+whole slice — tickets, comments, the trail, the export and the socket — with payloads captured from
+the running application; hand it to whoever writes the frontend, together with
+`documents/helpdesk/GUIA_FRONTEND_HELPDESK.md`.
+
 **Reactive audit trail.** `@nestjs/event-emitter` implements an Observer pattern: mutations emit
-events, and the audit module listens and persists log rows in `JSONB`. Business logic must not
-call the audit service directly — that coupling is exactly what this design removes.
+events, and `src/audit/` listens and persists log rows in `JSONB`. Business logic must not
+call the audit service directly — that coupling is exactly what this design removes, and nothing in
+`src/tickets/` or `src/comments/` imports the audit module.
+
+Two things about it are load-bearing. `EventEmitterModule.forRoot({ wildcard: true })` is what makes
+the listener's `ticket.*` pattern match at all, and **its absence is silent**: no listener fires,
+nothing errors, the trail is simply always empty. And the event carries `tenantId` in its payload
+rather than inheriting the request's scope — the scope does survive an `emit`, measured, but that is
+a fact about the emitter's dispatch strategy rather than a decision made here.
 
 **Asynchronous processing.** Anything that would block the Node event loop (report generation,
 file processing) goes to a BullMQ queue on Redis instead of running in the request. Redis is
 configured with `maxmemory-policy noeviction` in `docker-compose.yml` because evicting a BullMQ
 key mid-flight corrupts the queue.
 
+`src/reports/` is the worked example: `POST /reports/tickets` answers `202` and the worker fills the
+row in later. It is also the concrete case of the rule above — the job payload carries the whole
+`AuthenticatedUser`, and the processor opens `runWithTenant()` before its first query. It gathers
+rows by paging `TicketsService.findAll` rather than writing a query of its own, so an export cannot
+contain a ticket the requester could not have listed.
+
 **Real-time notifications.** A NestJS WebSockets Gateway (socket.io) notifies the client when a
 background job finishes. Redis therefore serves double duty: queue backend and permission cache.
+
+`src/realtime/` subscribes to the same event stream the audit trail does, so no domain service knows
+it exists. **The visibility rule has to be re-established at that boundary**: a socket joins
+`user:<id>` always and `tenant:<id>:staff` only if it is an `ADMIN` or an `AGENT`, because
+broadcasting to a plain per-tenant room would hand a `REQUESTER` every ticket in the company with no
+controller involved to refuse it — and no HTTP test would fail. The handshake re-reads the role from
+the database for the same reason `JwtStrategy` does, and more so: a socket outlives an access token
+by hours.
 
 ## Stack notes
 

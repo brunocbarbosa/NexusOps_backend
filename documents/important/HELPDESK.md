@@ -159,6 +159,36 @@ on the ticket or on the people.
 **`version` is on the wire because it has to be.** A client cannot send it back on the next `PATCH`
 without having received it, and every write route requires it.
 
+Captured from the running application —
+`POST /tickets` with `{ "title": "Printer on the 3rd floor is jammed", "description": "It jams on
+every duplex job.", "priority": "HIGH", "category": "HARDWARE" }` as a `REQUESTER`:
+
+```json
+{
+  "id": "14dd6147-c887-492e-bc08-a47b55457931",
+  "number": 1,
+  "title": "Printer on the 3rd floor is jammed",
+  "description": "It jams on every duplex job.",
+  "status": "OPEN",
+  "priority": "HIGH",
+  "category": "HARDWARE",
+  "version": 1,
+  "requester": {
+    "id": "369d7447-5a4c-49f6-8027-9c2e08c73cb9",
+    "email": "req@capture.example",
+    "role": "REQUESTER",
+    "createdAt": "2026-08-29T23:14:49.857Z",
+    "deletedAt": null
+  },
+  "assignee": null,
+  "closedBy": null,
+  "resolvedAt": null,
+  "closedAt": null,
+  "createdAt": "2026-08-29T23:14:49.897Z",
+  "updatedAt": "2026-08-29T23:14:49.897Z"
+}
+```
+
 ### The lifecycle
 
 ```
@@ -219,6 +249,55 @@ hiding it was for.
 routes do not exist. The thread is what the audit trail renders as a timeline, and a timeline whose
 entries can be rewritten is not one.
 
+`POST /tickets/:ticketId/comments` with `{ "body": "Still jamming this morning." }`:
+
+```json
+{
+  "id": "8675b459-8de7-4252-898f-96bcc0c6e536",
+  "ticketId": "14dd6147-c887-492e-bc08-a47b55457931",
+  "body": "Still jamming this morning.",
+  "isInternal": false,
+  "author": {
+    "id": "369d7447-5a4c-49f6-8027-9c2e08c73cb9",
+    "email": "req@capture.example",
+    "role": "REQUESTER",
+    "createdAt": "2026-08-29T23:14:49.857Z",
+    "deletedAt": null
+  },
+  "createdAt": "2026-08-29T23:14:49.995Z"
+}
+```
+
+The same ticket read back by the requester, after an agent has left an internal note on it. The note
+is in neither the page nor the `total`:
+
+```json
+{
+  "data": [
+    {
+      "id": "8675b459-8de7-4252-898f-96bcc0c6e536",
+      "ticketId": "14dd6147-c887-492e-bc08-a47b55457931",
+      "body": "Still jamming this morning.",
+      "isInternal": false,
+      "author": {
+        "id": "369d7447-5a4c-49f6-8027-9c2e08c73cb9",
+        "email": "req@capture.example",
+        "role": "REQUESTER",
+        "createdAt": "2026-08-29T23:14:49.857Z",
+        "deletedAt": null
+      },
+      "createdAt": "2026-08-29T23:14:49.995Z"
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "perPage": 20,
+    "totalPages": 1
+  }
+}
+```
+
 **A closed ticket takes no new comments** — `409` — but stays readable. Frozen, not hidden.
 
 ### The audit trail
@@ -275,6 +354,88 @@ unchanged does not report a title change.
 load-bearing: it lets a `REQUESTER`'s timeline be filtered with a plain column comparison instead of
 a JSONB path query. They never see that action, and it is excluded from `meta.total` as well.
 
+`GET /tickets/:ticketId/timeline?perPage=3`, after the ticket above was opened, assigned and moved
+to `IN_PROGRESS`:
+
+```json
+{
+  "data": [
+    {
+      "id": "05985a2b-b0b2-4674-ae0a-6115d6b063c3",
+      "entityType": "Ticket",
+      "entityId": "14dd6147-c887-492e-bc08-a47b55457931",
+      "action": "created",
+      "oldValues": {},
+      "newValues": {
+        "title": "Printer on the 3rd floor is jammed",
+        "number": 1,
+        "status": "OPEN",
+        "category": "HARDWARE",
+        "priority": "HIGH"
+      },
+      "user": {
+        "id": "369d7447-5a4c-49f6-8027-9c2e08c73cb9",
+        "email": "req@capture.example",
+        "role": "REQUESTER",
+        "createdAt": "2026-08-29T23:14:49.857Z",
+        "deletedAt": null
+      },
+      "createdAt": "2026-08-29T23:14:49.909Z"
+    },
+    {
+      "id": "d6f0383f-dc8e-47e6-a12d-d95c2633d216",
+      "entityType": "Ticket",
+      "entityId": "14dd6147-c887-492e-bc08-a47b55457931",
+      "action": "assigned",
+      "oldValues": {
+        "assigneeId": null
+      },
+      "newValues": {
+        "assigneeId": "01f57da2-8f2f-4d52-9f76-d1a6a941d9ed"
+      },
+      "user": {
+        "id": "01f57da2-8f2f-4d52-9f76-d1a6a941d9ed",
+        "email": "agent@capture.example",
+        "role": "AGENT",
+        "createdAt": "2026-08-29T23:14:49.850Z",
+        "deletedAt": null
+      },
+      "createdAt": "2026-08-29T23:14:49.955Z"
+    },
+    {
+      "id": "ffa8ae34-63e3-4c00-8a70-4adf6b24b43a",
+      "entityType": "Ticket",
+      "entityId": "14dd6147-c887-492e-bc08-a47b55457931",
+      "action": "status_changed",
+      "oldValues": {
+        "status": "OPEN"
+      },
+      "newValues": {
+        "status": "IN_PROGRESS"
+      },
+      "user": {
+        "id": "01f57da2-8f2f-4d52-9f76-d1a6a941d9ed",
+        "email": "agent@capture.example",
+        "role": "AGENT",
+        "createdAt": "2026-08-29T23:14:49.850Z",
+        "deletedAt": null
+      },
+      "createdAt": "2026-08-29T23:14:49.966Z"
+    }
+  ],
+  "meta": {
+    "total": 6,
+    "page": 1,
+    "perPage": 3,
+    "totalPages": 2
+  }
+}
+```
+
+Note `"oldValues": {}` on `created` against `"oldValues": null` on a comment entry: an empty object
+means "nothing changed because nothing existed", while `null` is a column that was never written.
+They are different values in the database and the API does not smooth them over.
+
 **The trail is written after the response.** An entry appears a moment after the mutation returns,
 so a client that reads the timeline immediately may be one entry behind. See Part II for why that
 is the accepted trade and not an oversight.
@@ -325,6 +486,62 @@ Another person's report is `404`, in the same company or not.
 `GET /reports/:id/download` answers `409` while the job has not finished, rather than `200` with an
 empty body: a file downloaded too early is indistinguishable from a report with no matching tickets.
 On `FAILED` the `409` carries the recorded reason.
+
+`POST /reports/tickets` with `{ "status": "RESOLVED" }` — the `202`:
+
+```json
+{
+  "id": "a36d136f-816e-419c-8a98-0647c1b7f0f9",
+  "status": "PENDING",
+  "filters": {
+    "status": "RESOLVED"
+  },
+  "rowCount": null,
+  "error": null,
+  "requestedBy": {
+    "id": "01f57da2-8f2f-4d52-9f76-d1a6a941d9ed",
+    "email": "agent@capture.example",
+    "role": "AGENT",
+    "createdAt": "2026-08-29T23:14:49.850Z",
+    "deletedAt": null
+  },
+  "createdAt": "2026-08-29T23:14:50.453Z",
+  "completedAt": null
+}
+```
+
+The same report a moment later, on `GET /reports/:id`:
+
+```json
+{
+  "id": "a36d136f-816e-419c-8a98-0647c1b7f0f9",
+  "status": "COMPLETED",
+  "filters": {
+    "status": "RESOLVED"
+  },
+  "rowCount": 1,
+  "error": null,
+  "requestedBy": {
+    "id": "01f57da2-8f2f-4d52-9f76-d1a6a941d9ed",
+    "email": "agent@capture.example",
+    "role": "AGENT",
+    "createdAt": "2026-08-29T23:14:49.850Z",
+    "deletedAt": null
+  },
+  "createdAt": "2026-08-29T23:14:50.453Z",
+  "completedAt": "2026-08-29T23:14:50.470Z"
+}
+```
+
+And `GET /reports/:id/download`:
+
+```
+Content-Type: text/csv; charset=utf-8
+Content-Disposition: attachment; filename="tickets-a36d136f-816e-419c-8a98-0647c1b7f0f9.csv"
+
+"number","title","status","priority","category","requester","assignee","createdAt","resolvedAt","closedAt"
+"1","Printer on the 3rd floor is jammed","RESOLVED","HIGH","HARDWARE","req@capture.example","agent@capture.example","2026-08-29T23:14:49.897Z","2026-08-29T23:14:49.972Z",""
+```
 
 **Every CSV cell is quoted**, including the header, and a cell beginning with `=`, `+`, `-` or `@`
 is prefixed with a single quote. The first is RFC 4180 and means a ticket title containing a comma
@@ -380,7 +597,126 @@ download immediately rather than racing the update that woke it.
 
 ### The error catalogue
 
-_Written once every route exists, with real bodies captured from the running application._
+The envelope is the one used everywhere: `message` is a **string** for a business error and an
+**array** for validation. `401` carries no `error` key.
+
+| Status | Meaning here                                                                       |
+| ------ | ---------------------------------------------------------------------------------- |
+| `400`  | the payload or the query failed validation, or two filters contradicted each other |
+| `401`  | no token, an expired one, or a refresh token presented as an access token          |
+| `403`  | the route needs a role the caller does not have, or an internal note does          |
+| `404`  | the ticket, comment thread, timeline or report is not visible to this caller       |
+| `409`  | the request is well formed and the current state refuses it                        |
+
+**`404` and `403` are not interchangeable.** A `404` means the resource is outside what the caller
+can see — another company's, or another requester's — and says so without confirming that the id
+exists anywhere. A `403` means the resource is visible and the _action_ is not allowed, which leaks
+nothing the caller did not already know.
+
+Real bodies:
+
+```json
+{
+  "message": "This ticket was changed by someone else (it is now at version 4). Reload it and reapply your change.",
+  "error": "Conflict",
+  "statusCode": 409
+}
+```
+
+```json
+{
+  "message": "A ticket cannot go from RESOLVED to IN_PROGRESS",
+  "error": "Conflict",
+  "statusCode": 409
+}
+```
+
+```json
+{
+  "message": "req@capture.example is a REQUESTER and cannot be assigned a ticket. Only an AGENT or an ADMIN works tickets.",
+  "error": "Conflict",
+  "statusCode": 409
+}
+```
+
+```json
+{
+  "message": [
+    "version must not be less than 1",
+    "version must be an integer number",
+    "title must be longer than or equal to 3 characters"
+  ],
+  "error": "Bad Request",
+  "statusCode": 400
+}
+```
+
+```json
+{
+  "message": [
+    "property tenantId should not exist",
+    "title must be longer than or equal to 3 characters"
+  ],
+  "error": "Bad Request",
+  "statusCode": 400
+}
+```
+
+```json
+{
+  "message": "unassigned and assigneeId contradict each other. Send one or the other.",
+  "error": "Bad Request",
+  "statusCode": 400
+}
+```
+
+```json
+{
+  "message": "No ticket 14dd6147-c887-492e-bc08-a47b55457931",
+  "error": "Not Found",
+  "statusCode": 404
+}
+```
+
+```json
+{
+  "message": "Only an ADMIN or an AGENT can leave an internal note",
+  "error": "Forbidden",
+  "statusCode": 403
+}
+```
+
+```json
+{
+  "message": "This route requires one of: ADMIN, AGENT",
+  "error": "Forbidden",
+  "statusCode": 403
+}
+```
+
+```json
+{
+  "message": "Unauthorized",
+  "statusCode": 401
+}
+```
+
+The `409` on a version conflict **carries the current version in its message**, so a client can tell
+the user how far behind they were before reloading.
+
+### Known gaps
+
+Real today, and a client will meet them:
+
+- **A ticket cannot be reopened once `CLOSED`.** The intended flow is a new ticket that references
+  it; there is no field for that reference yet.
+- **A ticket cannot be opened on somebody else's behalf.** The requester is always the caller, so an
+  agent taking a phone call has to open it as themselves.
+- **There is no attachment.** `MAIN.md` foresees object storage; nothing in the API accepts a file.
+- **The report CSV lives in a database column**, bounded by `REPORTS_MAX_ROWS`. A report that hits
+  the cap is truncated rather than refused, and `rowCount` is the only signal.
+- **The timeline can lag the mutation by a moment.** The trail is written after the response — see
+  Part II.
 
 ---
 

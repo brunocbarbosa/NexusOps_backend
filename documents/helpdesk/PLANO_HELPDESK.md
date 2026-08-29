@@ -12,8 +12,8 @@
 > | 3 — Comentários              | ✅ concluída | `4c28670` |
 > | 4 — Trilha de auditoria      | ✅ concluída | `8032196` |
 > | 5 — Fila BullMQ e relatórios | ✅ concluída | `600810f` |
-> | 6 — WebSocket                | ✅ concluída | —         |
-> | 7 — Documentação final       | ⏳ pendente  | —         |
+> | 6 — WebSocket                | ✅ concluída | `311ff9e` |
+> | 7 — Documentação final       | ✅ concluída | —         |
 >
 > As seções das fases concluídas ganham uma nota **Como saiu** ao final, com os desvios em relação
 > ao que estava planejado e os defeitos encontrados durante a execução.
