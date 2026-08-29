@@ -221,6 +221,64 @@ entries can be rewritten is not one.
 
 **A closed ticket takes no new comments** — `409` — but stays readable. Frozen, not hidden.
 
+### The audit trail
+
+Nothing asks for an entry. `TicketsService` and `CommentsService` emit, `AuditListener` records, and
+the two never meet — no domain service imports the audit module. That is the Observer the
+architecture calls for, and its practical consequence is that forgetting to log is not a thing a
+future method can do.
+
+| Method | Path                          | Auth    | Success | Purpose               |
+| ------ | ----------------------------- | ------- | ------- | --------------------- |
+| `GET`  | `/tickets/:ticketId/timeline` | any     | `200`   | one ticket's history  |
+| `GET`  | `/audit`                      | `ADMIN` | `200`   | the company-wide feed |
+
+The timeline resolves the ticket first, so one you cannot see answers `404` — it is not a side
+channel onto the tickets the list route hides. The feed spans every ticket, which is why the ticket
+visibility rule cannot narrow it and `ADMIN` is the only thing that can.
+
+Both take `page`, `perPage`, `action` and `userId`; the feed also takes `entityId`. The timeline
+reads **oldest first**, the feed **newest first**.
+
+```ts
+type AuditResponse = {
+  id: string;
+  entityType: 'Ticket';
+  entityId: string;
+  action: AuditAction;
+  oldValues: unknown; // JSONB; shape depends on the action, see below
+  newValues: unknown;
+  user: UserResponse | null; // null once the actor has been anonymised
+  createdAt: string;
+};
+```
+
+**Everything is recorded against the ticket**, comments included. A comment appears as a
+`commented` action on the ticket rather than as an entry about itself, because a timeline that had
+to chase a second entity to find out somebody replied would not be a timeline. The comment
+_bodies_ come from `GET /tickets/:ticketId/comments`; the client interleaves the two by
+`createdAt`.
+
+| `action`              | `oldValues`           | `newValues`                                         |
+| --------------------- | --------------------- | --------------------------------------------------- |
+| `created`             | `{}`                  | `number`, `title`, `status`, `priority`, `category` |
+| `updated`             | the fields that moved | the same fields, after                              |
+| `status_changed`      | `{ status }`          | `{ status }`                                        |
+| `assigned`            | `{ assigneeId }`      | `{ assigneeId }` — `null` when unassigned           |
+| `commented`           | —                     | `{ commentId }`                                     |
+| `internal_note_added` | —                     | `{ commentId }`                                     |
+
+`updated` carries **only what actually moved**. A partial `PATCH` that resubmits the same title
+unchanged does not report a title change.
+
+**`internal_note_added` is a separate action rather than a flag inside `newValues`**, and that is
+load-bearing: it lets a `REQUESTER`'s timeline be filtered with a plain column comparison instead of
+a JSONB path query. They never see that action, and it is excluded from `meta.total` as well.
+
+**The trail is written after the response.** An entry appears a moment after the mutation returns,
+so a client that reads the timeline immediately may be one entry behind. See Part II for why that
+is the accepted trade and not an oversight.
+
 ### `ReportResponse`
 
 _Written in Fase 5._
@@ -381,13 +439,77 @@ it reads from a query string or from a body. `@IsInt()` does not — implicit co
 string is what makes the query DTOs work at all, and a non-numeric string fails the validator
 honestly.
 
-### Whether the tenant context survives an event-emitter `emit`
+### The tenant context does survive an `emit`, and the listener ignores that
 
-_Fase 4._
+The question the design turned on: if a service emits inside `runWithTenant`, does the listener run
+inside that scope?
+
+**It does — both ways.** Measured with a bare `EventEmitter2` rather than through the application,
+so the answer is about the library and not about this wiring
+(`test/integration/audit-trail.int-spec.ts`):
+
+- a synchronous listener reading `currentScope()` sees `{ kind: 'tenant', tenantId }`. `emit`
+  dispatches on the caller's stack, so there is no boundary to lose the scope at.
+- an async listener that awaits a `setImmediate` first _still_ sees it. `AsyncLocalStorage`
+  propagates through the continuation.
+
+**`AuditListener` opens the scope from the event payload anyway.** That is not belt-and-braces, it
+is a refusal to depend on the measurement: what the two results describe is
+`@nestjs/event-emitter`'s dispatch strategy, which is a fact about a dependency and not a decision
+this repository made. A future `emitAsync`, a queued dispatcher, or a listener moved onto a BullMQ
+queue would each take the scope away, and none of them would fail loudly — the listener would just
+start writing into whatever tenant happened to be current, or throw
+`TenantContextMissingError` in a background handler nobody is watching.
+
+Carrying `tenantId` in the payload is also exactly what a worker has to do, so there is one rule for
+"code that runs outside a request" instead of two that look alike until one of them breaks.
 
 ### The audit write lands outside the mutation's transaction
 
-_Fase 4._
+`mutate()` emits **after** `$transaction` resolves, not inside the callback. Inside, an event would
+announce a change that a later statement could still roll back, and the trail would record something
+that never happened. `test/integration/audit-trail.int-spec.ts` pins the other half of that: a
+`changeStatus` refused with a version conflict leaves the ticket with exactly one entry, its
+creation.
+
+The cost is that the write is not atomic with the change it describes. If the insert into
+`audit_logs` fails, the mutation has already committed and the trail is behind the data.
+`AuditListener` catches, logs at error level with the tenant, entity and action, and does not
+rethrow — by then the response has gone out, so throwing would surface as an unhandled rejection
+rather than as anything a caller could act on.
+
+**This is a real gap, and the alternative was worse.** Writing the entry inside the transaction
+would re-couple `TicketsService` to `AuditService` — the exact coupling the Observer exists to
+remove — and would make an audit failure roll back a legitimate ticket update. The gap to close
+later is a durable one: emit onto a queue and let the worker retry.
+
+### `wildcard: true` is not optional, and its absence is silent
+
+`AuditListener` subscribes to `ticket.*`. Without `wildcard: true` on
+`EventEmitterModule.forRoot()`, `eventemitter2` matches names literally: `ticket.*` becomes a
+subscription to an event nobody emits, no listener ever fires, and **nothing anywhere reports a
+problem** — the mutations still succeed, the trail is simply always empty.
+
+`audit-trail.int-spec.ts` asserts `emitter.listeners('ticket.created')` has length 1 for exactly
+that reason. Without it, every other assertion in the suite would fail in a way that looks like a
+database problem.
+
+The same wiring caught a second thing worth knowing: `TicketsService` now injects `EventEmitter2`,
+which only exists once `forRoot()` has run. Two integration suites that build a `TestingModule` from
+`TicketsModule` alone stopped resolving, and had to import it. That failure is the honest signal
+that emitting is now part of what a ticket mutation _is_.
+
+### `Prisma.DbNull`, not `null`, for an empty JSONB column
+
+`audit_logs.old_values` is nullable JSON, and Prisma refuses a bare `null` there: it cannot tell
+whether the caller means the JSON value `null` or a SQL `NULL`. `Prisma.DbNull` is the one that
+means "no row value", `Prisma.JsonNull` the other.
+
+`AuditService` also casts its payloads to `Prisma.InputJsonObject`. `Record<string, unknown>` is
+structurally a JSON object, but `InputJsonValue` is recursive in a way TypeScript cannot see
+through. What makes the cast true rather than convenient is that everything the domain puts in these
+payloads is a string, a number, a boolean or null — a constraint worth re-checking if an entry ever
+starts carrying a Date.
 
 ### The report worker has no request context
 

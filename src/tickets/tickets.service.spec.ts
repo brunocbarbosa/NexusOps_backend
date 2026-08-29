@@ -11,6 +11,7 @@ import {
   TicketStatus,
   UserRole,
 } from '../generated/prisma/enums';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { runWithTenant } from '../tenancy/tenant-context';
 import { TicketWithPeople } from './ticket-response';
@@ -89,6 +90,7 @@ describe('TicketsService', () => {
     user: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
+  let events: { emit: jest.Mock };
   let tickets: TicketsService;
 
   const inTenant = <T>(fn: () => Promise<T>) => runWithTenant(TENANT, fn);
@@ -117,7 +119,11 @@ describe('TicketsService', () => {
       ),
     };
 
-    tickets = new TicketsService(prisma as unknown as ExtendedPrismaClient);
+    events = { emit: jest.fn() };
+    tickets = new TicketsService(
+      prisma as unknown as ExtendedPrismaClient,
+      events as unknown as EventEmitter2,
+    );
   });
 
   describe('create', () => {
@@ -441,5 +447,90 @@ describe('TicketsService', () => {
         tickets.update('ticket-1', { version: 1, title: 'new' }, agent),
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  // The Observer contract, from the emitting side: the service reaches the
+  // audit trail only through the emitter, and the tenant rides in the payload
+  // because a listener has no promise of inheriting the request's scope.
+  describe('the events it emits', () => {
+    it('announces a new ticket with the tenant in the payload', async () => {
+      await inTenant(() => tickets.create({ title: 'x' }, requester));
+
+      const [name, event] = events.emit.mock.calls[0] as [
+        string,
+        { tenantId: string; actorId: string; action: string },
+      ];
+      expect(name).toBe('ticket.created');
+      expect(event.tenantId).toBe(TENANT);
+      expect(event.actorId).toBe('user-1');
+    });
+
+    it('names a status change distinctly from an edit', async () => {
+      // The re-read after the write is what the event's newValues come from,
+      // so the mock has to move too.
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue(
+        row({ version: 2, status: TicketStatus.IN_PROGRESS }),
+      );
+
+      await inTenant(() =>
+        tickets.changeStatus(
+          'ticket-1',
+          { version: 1, status: TicketStatus.IN_PROGRESS },
+          agent,
+        ),
+      );
+
+      const [name, event] = events.emit.mock.calls[0] as [
+        string,
+        { oldValues: unknown; newValues: unknown },
+      ];
+      expect(name).toBe('ticket.status_changed');
+      expect(event.oldValues).toEqual({ status: TicketStatus.OPEN });
+      expect(event.newValues).toEqual({ status: TicketStatus.IN_PROGRESS });
+    });
+
+    it('records only the fields an edit actually moved', async () => {
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue(
+        row({ version: 2, title: 'new title' }),
+      );
+
+      // description, priority and category were sent unchanged; a trail that
+      // logged them would make every entry unreadable.
+      await inTenant(() =>
+        tickets.update(
+          'ticket-1',
+          {
+            version: 1,
+            title: 'new title',
+            priority: TicketPriority.MEDIUM,
+          },
+          agent,
+        ),
+      );
+
+      const [, event] = events.emit.mock.calls[0] as [
+        string,
+        {
+          oldValues: Record<string, unknown>;
+          newValues: Record<string, unknown>;
+        },
+      ];
+      expect(event.newValues).toEqual({ title: 'new title' });
+      expect(event.oldValues).toEqual({ title: 'Printer is on fire' });
+    });
+
+    it('says nothing when the write was refused', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        inTenant(() =>
+          tickets.update('ticket-1', { version: 1, title: 'new' }, agent),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      // Emitting inside the transaction would have announced a change that
+      // never committed.
+      expect(events.emit).not.toHaveBeenCalled();
+    });
   });
 });

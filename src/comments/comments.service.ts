@@ -4,6 +4,13 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITIES,
+  auditEventName,
+} from '../audit/audit.events';
+import type { AuditEvent } from '../audit/audit.events';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
 import { Prisma } from '../generated/prisma/client';
 import { TicketStatus } from '../generated/prisma/enums';
@@ -45,6 +52,7 @@ export class CommentsService {
   constructor(
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
     private readonly tickets: TicketsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async create(
@@ -78,6 +86,26 @@ export class CommentsService {
       }),
       include: COMMENT_AUTHOR,
     });
+
+    // Recorded against the **ticket**, not against the comment: the ticket is
+    // the aggregate, and a timeline that had to chase a second entity to find
+    // out somebody replied would not be a timeline. `internal_note_added` is a
+    // distinct action rather than a flag in the payload so that hiding it from
+    // a requester stays a plain column comparison.
+    const event: AuditEvent = {
+      tenantId: author.tenantId,
+      actorId: author.id,
+      entityType: AUDIT_ENTITIES.Ticket,
+      entityId: ticket.id,
+      action: comment.isInternal
+        ? AUDIT_ACTIONS.InternalNoteAdded
+        : AUDIT_ACTIONS.Commented,
+      newValues: { commentId: comment.id },
+    };
+    this.events.emit(
+      auditEventName(AUDIT_ENTITIES.Ticket, event.action),
+      event,
+    );
 
     return toCommentResponse(comment);
   }

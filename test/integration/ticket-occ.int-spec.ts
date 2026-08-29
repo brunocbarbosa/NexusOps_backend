@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ConflictException } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { AuthenticatedUser } from '../../src/auth/authenticated-user';
 import { validateEnv } from '../../src/config/env.validation';
@@ -42,6 +43,11 @@ describe('ticket optimistic concurrency', () => {
     mod = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+        // TicketsService injects EventEmitter2, which only exists once
+        // forRoot() has run. Without this the module fails to resolve, which
+        // is the honest signal that emitting is now part of what a ticket
+        // mutation does.
+        EventEmitterModule.forRoot({ wildcard: true }),
         TicketsModule,
       ],
     }).compile();

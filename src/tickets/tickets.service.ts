@@ -5,6 +5,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITIES,
+  AuditAction,
+  AuditEvent,
+  auditEventName,
+} from '../audit/audit.events';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
 import { Prisma } from '../generated/prisma/client';
 import { TicketStatus, UserRole } from '../generated/prisma/enums';
@@ -27,6 +35,13 @@ import {
 } from './ticket-response';
 import { canTransition } from './ticket-transitions';
 import { seesEveryTicket } from './ticket-visibility';
+
+/** What a mutation reports to the trail, built after the write has committed. */
+type AuditChange = {
+  action: AuditAction;
+  oldValues: Record<string, unknown>;
+  newValues: Record<string, unknown>;
+};
 
 export type PaginatedTickets = {
   data: TicketResponse[];
@@ -54,7 +69,10 @@ export type PaginatedTickets = {
  */
 @Injectable()
 export class TicketsService {
-  constructor(@Inject(PRISMA) private readonly prisma: ExtendedPrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
+    private readonly events: EventEmitter2,
+  ) {}
 
   /**
    * Opens a ticket, taking the next number in the company's sequence.
@@ -100,7 +118,20 @@ export class TicketsService {
       });
     });
 
-    return toTicketResponse(ticket);
+    const response = toTicketResponse(ticket);
+    this.emit(requester, response.id, {
+      action: AUDIT_ACTIONS.Created,
+      oldValues: {},
+      newValues: {
+        number: response.number,
+        title: response.title,
+        status: response.status,
+        priority: response.priority,
+        category: response.category,
+      },
+    });
+
+    return response;
   }
 
   async findAll(
@@ -181,18 +212,31 @@ export class TicketsService {
     dto: UpdateTicketDto,
     requester: AuthenticatedUser,
   ): Promise<TicketResponse> {
-    return this.mutate(id, dto.version, requester, (_tx, current) => {
-      this.assertOpenForEditing(current);
+    return this.mutate(
+      id,
+      dto.version,
+      requester,
+      (_tx, current) => {
+        this.assertOpenForEditing(current);
 
-      // Undefined fields are left alone by Prisma, which is what makes a
-      // partial PATCH work without the service comparing anything.
-      return Promise.resolve({
-        title: dto.title,
-        description: dto.description,
-        priority: dto.priority,
-        category: dto.category,
-      });
-    });
+        // Undefined fields are left alone by Prisma, which is what makes a
+        // partial PATCH work without the service comparing anything.
+        return Promise.resolve({
+          title: dto.title,
+          description: dto.description,
+          priority: dto.priority,
+          category: dto.category,
+        });
+      },
+      // Only what actually changed. Recording the whole row on every edit would
+      // make the trail unreadable and would grow every entry with columns the
+      // edit never touched.
+      (before, after) => ({
+        action: AUDIT_ACTIONS.Updated,
+        oldValues: changedFields(before, after, EDITABLE_FIELDS, 'before'),
+        newValues: changedFields(before, after, EDITABLE_FIELDS, 'after'),
+      }),
+    );
   }
 
   /**
@@ -204,35 +248,45 @@ export class TicketsService {
     dto: ChangeStatusDto,
     requester: AuthenticatedUser,
   ): Promise<TicketResponse> {
-    return this.mutate(id, dto.version, requester, (_tx, current) => {
-      if (current.status === dto.status) {
-        throw new ConflictException(
-          `This ticket is already ${dto.status.toLowerCase()}`,
-        );
-      }
+    return this.mutate(
+      id,
+      dto.version,
+      requester,
+      (_tx, current) => {
+        if (current.status === dto.status) {
+          throw new ConflictException(
+            `This ticket is already ${dto.status.toLowerCase()}`,
+          );
+        }
 
-      if (!canTransition(current.status, dto.status)) {
-        throw new ConflictException(
-          `A ticket cannot go from ${current.status} to ${dto.status}`,
-        );
-      }
+        if (!canTransition(current.status, dto.status)) {
+          throw new ConflictException(
+            `A ticket cannot go from ${current.status} to ${dto.status}`,
+          );
+        }
 
-      return Promise.resolve({
-        status: dto.status,
-        ...(dto.status === TicketStatus.RESOLVED
-          ? { resolvedAt: new Date() }
-          : {}),
-        // Cleared only on the way back to OPEN. Reopening discards the
-        // resolution, so a ticket sitting in OPEN while carrying a resolvedAt
-        // would be a row contradicting itself. Closing does the opposite: it
-        // keeps it, because when the work finished is the whole point of any
-        // time-to-resolution report.
-        ...(dto.status === TicketStatus.OPEN ? { resolvedAt: null } : {}),
-        ...(dto.status === TicketStatus.CLOSED
-          ? { closedAt: new Date(), closedById: requester.id }
-          : {}),
-      });
-    });
+        return Promise.resolve({
+          status: dto.status,
+          ...(dto.status === TicketStatus.RESOLVED
+            ? { resolvedAt: new Date() }
+            : {}),
+          // Cleared only on the way back to OPEN. Reopening discards the
+          // resolution, so a ticket sitting in OPEN while carrying a resolvedAt
+          // would be a row contradicting itself. Closing does the opposite: it
+          // keeps it, because when the work finished is the whole point of any
+          // time-to-resolution report.
+          ...(dto.status === TicketStatus.OPEN ? { resolvedAt: null } : {}),
+          ...(dto.status === TicketStatus.CLOSED
+            ? { closedAt: new Date(), closedById: requester.id }
+            : {}),
+        });
+      },
+      (before, after) => ({
+        action: AUDIT_ACTIONS.StatusChanged,
+        oldValues: { status: before.status },
+        newValues: { status: after.status },
+      }),
+    );
   }
 
   /**
@@ -244,15 +298,25 @@ export class TicketsService {
     dto: AssignTicketDto,
     requester: AuthenticatedUser,
   ): Promise<TicketResponse> {
-    return this.mutate(id, dto.version, requester, async (tx, current) => {
-      this.assertOpenForEditing(current);
+    return this.mutate(
+      id,
+      dto.version,
+      requester,
+      async (tx, current) => {
+        this.assertOpenForEditing(current);
 
-      if (dto.assigneeId !== null) {
-        await this.assertAssignable(tx, dto.assigneeId);
-      }
+        if (dto.assigneeId !== null) {
+          await this.assertAssignable(tx, dto.assigneeId);
+        }
 
-      return { assigneeId: dto.assigneeId };
-    });
+        return { assigneeId: dto.assigneeId };
+      },
+      (before, after) => ({
+        action: AUDIT_ACTIONS.Assigned,
+        oldValues: { assigneeId: before.assigneeId },
+        newValues: { assigneeId: after.assignee?.id ?? null },
+      }),
+    );
   }
 
   /**
@@ -318,8 +382,9 @@ export class TicketsService {
       tx: ExtendedTransactionClient,
       current: TicketWithPeople,
     ) => Promise<Prisma.TicketUncheckedUpdateManyInput>,
+    audit: (before: TicketWithPeople, after: TicketResponse) => AuditChange,
   ): Promise<TicketResponse> {
-    return this.prisma.$transaction(async (tx) => {
+    const [before, after] = await this.prisma.$transaction(async (tx) => {
       const current = await this.load(tx, id, requester);
       const data = await change(tx, current);
 
@@ -335,13 +400,49 @@ export class TicketsService {
         );
       }
 
-      return toTicketResponse(
-        await tx.ticket.findUniqueOrThrow({
-          where: { id },
-          include: TICKET_PEOPLE,
-        }),
-      );
+      const updated = await tx.ticket.findUniqueOrThrow({
+        where: { id },
+        include: TICKET_PEOPLE,
+      });
+
+      return [current, toTicketResponse(updated)] as const;
     });
+
+    // After the transaction, never inside it. An event emitted from within the
+    // callback would announce a change that a later statement could still roll
+    // back, and the trail would record something that never happened.
+    this.emit(requester, after.id, audit(before, after));
+
+    return after;
+  }
+
+  /**
+   * The single place this service talks to the outside world about a change.
+   *
+   * It emits and does not await: listeners are the audit trail and, later, the
+   * notification gateway, and neither is allowed to make a request slower or to
+   * fail it. `tenantId` rides in the payload because a listener has no promise
+   * of inheriting the request's scope — see `audit.events.ts`.
+   */
+  private emit(
+    actor: AuthenticatedUser,
+    ticketId: string,
+    change: AuditChange,
+  ): void {
+    const event: AuditEvent = {
+      tenantId: actor.tenantId,
+      actorId: actor.id,
+      entityType: AUDIT_ENTITIES.Ticket,
+      entityId: ticketId,
+      action: change.action,
+      oldValues: change.oldValues,
+      newValues: change.newValues,
+    };
+
+    this.events.emit(
+      auditEventName(AUDIT_ENTITIES.Ticket, change.action),
+      event,
+    );
   }
 
   /**
@@ -392,4 +493,38 @@ export class TicketsService {
       );
     }
   }
+}
+
+/** The fields `PATCH /tickets/:id` may touch, and therefore the ones it diffs. */
+const EDITABLE_FIELDS = [
+  'title',
+  'description',
+  'priority',
+  'category',
+] as const;
+
+/**
+ * The subset of `fields` whose value actually moved, taken from whichever side
+ * is asked for.
+ *
+ * A partial PATCH sends only some fields, and Prisma leaves the rest alone, so
+ * "what the request contained" and "what changed" are different questions. The
+ * trail wants the second one: an edit that resubmits the same title unchanged
+ * should not show up as a title change.
+ */
+function changedFields(
+  before: TicketWithPeople,
+  after: TicketResponse,
+  fields: readonly (keyof TicketResponse & keyof TicketWithPeople)[],
+  side: 'before' | 'after',
+): Record<string, unknown> {
+  const changed: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    if (before[field] !== after[field]) {
+      changed[field] = side === 'before' ? before[field] : after[field];
+    }
+  }
+
+  return changed;
 }

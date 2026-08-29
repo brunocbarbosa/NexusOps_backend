@@ -7,6 +7,7 @@ import {
   TicketStatus,
   UserRole,
 } from '../generated/prisma/enums';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { runWithTenant } from '../tenancy/tenant-context';
 import { TicketWithPeople } from '../tickets/ticket-response';
@@ -82,6 +83,7 @@ describe('CommentsService', () => {
     $transaction: jest.Mock;
   };
   let tickets: { requireTicket: jest.Mock };
+  let events: { emit: jest.Mock };
   let comments: CommentsService;
 
   const inTenant = <T>(fn: () => Promise<T>) => runWithTenant(TENANT, fn);
@@ -102,9 +104,11 @@ describe('CommentsService', () => {
     };
     tickets = { requireTicket: jest.fn().mockResolvedValue(ticket()) };
 
+    events = { emit: jest.fn() };
     comments = new CommentsService(
       prisma as unknown as ExtendedPrismaClient,
       tickets as unknown as TicketsService,
+      events as unknown as EventEmitter2,
     );
   });
 
@@ -231,6 +235,55 @@ describe('CommentsService', () => {
       page: 1,
       perPage: 20,
       totalPages: 1,
+    });
+  });
+
+  describe('the events it emits', () => {
+    it('records a reply against the ticket, not the comment', async () => {
+      await inTenant(() =>
+        comments.create('ticket-1', { body: 'hello' }, agent),
+      );
+
+      const [name, event] = events.emit.mock.calls[0] as [
+        string,
+        { entityId: string; entityType: string; newValues: unknown },
+      ];
+      expect(name).toBe('ticket.commented');
+      expect(event.entityType).toBe('Ticket');
+      // The ticket id, so one timeline query finds it.
+      expect(event.entityId).toBe('ticket-1');
+      expect(event.newValues).toEqual({ commentId: 'comment-1' });
+    });
+
+    it('gives an internal note its own action', async () => {
+      prisma.comment.create.mockResolvedValue(comment({ isInternal: true }));
+
+      await inTenant(() =>
+        comments.create(
+          'ticket-1',
+          { body: 'internal', isInternal: true },
+          agent,
+        ),
+      );
+
+      // A distinct action rather than a flag inside the payload, so that hiding
+      // it from a requester's timeline stays a plain column comparison.
+      const [name] = events.emit.mock.calls[0] as [string];
+      expect(name).toBe('ticket.internal_note_added');
+    });
+
+    it('says nothing when the comment was refused', async () => {
+      await expect(
+        inTenant(() =>
+          comments.create(
+            'ticket-1',
+            { body: 'secret', isInternal: true },
+            requester,
+          ),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(events.emit).not.toHaveBeenCalled();
     });
   });
 });

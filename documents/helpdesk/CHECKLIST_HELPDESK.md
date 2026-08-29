@@ -24,12 +24,12 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Progresso por PR
 
-| PR  | Branch                         | Fases | Estado         |
-| --- | ------------------------------ | ----- | -------------- |
-| 1   | `feat/helpdesk-tickets`        | 0–2   | ✅ concluída   |
-| 2   | `feat/helpdesk-comments-audit` | 3–4   | 🚧 em execução |
-| 3   | `feat/helpdesk-async`          | 5–6   | ⏳ pendente    |
-| 4   | `docs/helpdesk-reference`      | 7     | ⏳ pendente    |
+| PR  | Branch                         | Fases | Estado       |
+| --- | ------------------------------ | ----- | ------------ |
+| 1   | `feat/helpdesk-tickets`        | 0–2   | ✅ concluída |
+| 2   | `feat/helpdesk-comments-audit` | 3–4   | ✅ concluída |
+| 3   | `feat/helpdesk-async`          | 5–6   | ⏳ pendente  |
+| 4   | `docs/helpdesk-reference`      | 7     | ⏳ pendente  |
 
 ---
 
@@ -228,21 +228,42 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 4 — Trilha de auditoria
 
-- [ ] `src/audit/` — module, service, listener, events, controller, response
-- [ ] `EventEmitterModule.forRoot()` em `src/app.module.ts`
-- [ ] `TicketsService` e `CommentsService` **só emitem** — nenhuma chamada ao `AuditService`
-- [ ] `tenantId` e `actorId` no payload do evento; o listener abre `runWithTenant` explicitamente
-- [ ] **Medido** se o `AsyncLocalStorage` sobrevive ao `emit` síncrono, com o resultado anotado para
+- [x] `src/audit/` — module, service, listener, events, controller, response
+- [x] `EventEmitterModule.forRoot()` em `src/app.module.ts`
+- [x] `TicketsService` e `CommentsService` **só emitem** — nenhuma chamada ao `AuditService`
+- [x] `tenantId` e `actorId` no payload do evento; o listener abre `runWithTenant` explicitamente
+- [x] **Medido** se o `AsyncLocalStorage` sobrevive ao `emit` síncrono, com o resultado anotado para
       a Parte II do `HELPDESK.md`
-- [ ] Falha de auditoria logada em nível de erro, e a lacuna (escrita fora da transação) declarada
-- [ ] `GET /tickets/:id/timeline` respeitando visibilidade
-- [ ] `GET /audit` restrito a `ADMIN`, com filtros
+- [x] Falha de auditoria logada em nível de erro, e a lacuna (escrita fora da transação) declarada
+- [x] `GET /tickets/:id/timeline` respeitando visibilidade
+- [x] `GET /audit` restrito a `ADMIN`, com filtros
 
 ### Verificação
 
-- [ ] `test/integration/audit-trail.int-spec.ts` — linha em `audit_logs` com o `tenantId` certo,
+- [x] `test/integration/audit-trail.int-spec.ts` — linha em `audit_logs` com o `tenantId` certo,
       `oldValues`/`newValues` em JSONB, e nenhum vazamento entre tenants
-- [ ] `npm run test:all`
+- [x] `npm run test:all`
+
+### Não estava no plano
+
+- [x] **A medição respondeu ao contrário do que o plano supunha.** O plano dizia que o `emit`
+      síncrono "provavelmente" preserva o `AsyncLocalStorage`. Medido com um `EventEmitter2` puro:
+      preserva sim, e também sobrevive a um listener assíncrono que dá `await` antes de ler o
+      escopo. O listener continua abrindo o escopo pelo payload — o que foi medido é a estratégia
+      de dispatch de uma dependência, não uma decisão deste repositório
+- [x] `wildcard: true` no `EventEmitterModule.forRoot()` não é opcional e sua ausência é
+      **silenciosa**: sem ele o `ticket.*` vira assinatura de um evento que ninguém emite, nenhum
+      listener dispara e nada reclama — a trilha só fica sempre vazia. O
+      `audit-trail.int-spec.ts` afirma `listeners('ticket.created').length === 1` por causa disso
+- [x] Duas suítes de integração quebraram ao montar `TestingModule` só com `TicketsModule`: o
+      service passou a injetar `EventEmitter2`, que só existe depois do `forRoot()`. Corrigido
+      importando o módulo nas duas — a falha é o sinal honesto de que emitir agora faz parte do
+      que uma mutação de ticket é
+- [x] Comentário é registrado **contra o ticket**, não contra si mesmo, e nota interna ganhou ação
+      própria (`internal_note_added`). Não estava especificado; é o que permite filtrar a timeline
+      de um requester com comparação de coluna em vez de query em caminho JSONB
+- [x] `Prisma.DbNull` em vez de `null` nas colunas JSONB — o Prisma recusa um `null` cru porque não
+      distingue "valor JSON null" de "SQL NULL"
 
 ---
 
