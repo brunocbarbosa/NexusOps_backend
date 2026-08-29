@@ -10,8 +10,8 @@
 > | 1 — Schema e migration       | ✅ concluída | `548e5ce` |
 > | 2 — Módulo `tickets`         | ✅ concluída | `1c1c2c1` |
 > | 3 — Comentários              | ✅ concluída | `4c28670` |
-> | 4 — Trilha de auditoria      | ✅ concluída | —         |
-> | 5 — Fila BullMQ e relatórios | ⏳ pendente  | —         |
+> | 4 — Trilha de auditoria      | ✅ concluída | `8032196` |
+> | 5 — Fila BullMQ e relatórios | ✅ concluída | —         |
 > | 6 — WebSocket                | ⏳ pendente  | —         |
 > | 7 — Documentação final       | ⏳ pendente  | —         |
 >

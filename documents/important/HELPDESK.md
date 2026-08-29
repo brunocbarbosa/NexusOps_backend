@@ -281,7 +281,55 @@ is the accepted trade and not an oversight.
 
 ### `ReportResponse`
 
-_Written in Fase 5._
+The asynchronous export. `POST` hands the work to a queue and answers immediately; the CSV appears
+on the row a moment later.
+
+| Method | Path                    | Auth | Success | Purpose                      |
+| ------ | ----------------------- | ---- | ------- | ---------------------------- |
+| `POST` | `/reports/tickets`      | any  | `202`   | request a CSV of tickets     |
+| `GET`  | `/reports`              | any  | `200`   | your own requests, paginated |
+| `GET`  | `/reports/:id`          | any  | `200`   | one request's status         |
+| `GET`  | `/reports/:id/download` | any  | `200`   | the CSV itself, `text/csv`   |
+
+**`202`, not `201`.** What was created is a _request_, not a report: the file does not exist yet and
+may still fail. A `201` would tell a client the thing is ready, and the next thing it would do is
+download an empty file.
+
+```ts
+type ReportResponse = {
+  id: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  filters: unknown; // the JSON body that was requested, echoed back
+  rowCount: number | null; // filled on COMPLETED
+  error: string | null; // filled on FAILED
+  requestedBy: UserResponse;
+  createdAt: string;
+  completedAt: string | null;
+};
+```
+
+`content` is deliberately absent from this shape: the CSV can be tens of thousands of rows, and a
+client polling `GET /reports/:id` would carry the whole file on every poll. It has its own route.
+
+The `POST` body is the ticket filters only — `status`, `priority`, `category`, `assigneeId`,
+`requesterId`, `search`. **No `page` or `perPage`**: a report is every matching row up to
+`REPORTS_MAX_ROWS`, and offering a page size would invite a client to queue a report of twenty
+tickets and wonder why it did not come back synchronously.
+
+**Reports are personal, and that is a security property rather than a simplification.** Every route
+here filters by who requested it. The CSV was built through the requester's own visibility — a
+`REQUESTER`'s export holds only their tickets, an `AGENT`'s holds the company's — so letting a third
+person download somebody else's report would hand them rows the ticket routes would refuse them.
+Another person's report is `404`, in the same company or not.
+
+`GET /reports/:id/download` answers `409` while the job has not finished, rather than `200` with an
+empty body: a file downloaded too early is indistinguishable from a report with no matching tickets.
+On `FAILED` the `409` carries the recorded reason.
+
+**Every CSV cell is quoted**, including the header, and a cell beginning with `=`, `+`, `-` or `@`
+is prefixed with a single quote. The first is RFC 4180 and means a ticket title containing a comma
+survives; the second is because spreadsheets execute a leading `=` as a formula, which would turn a
+ticket title into an injection against whoever opens the file. Line endings are CRLF.
 
 ### The error catalogue
 
@@ -511,9 +559,94 @@ through. What makes the cast true rather than convenient is that everything the 
 payloads is a string, a number, a boolean or null — a constraint worth re-checking if an entry ever
 starts carrying a Date.
 
-### The report worker has no request context
+### The report worker has no request context, and the proof is one assertion
 
-_Fase 5._
+CLAUDE.md calls a background handler the single most likely place in this project for a tenant leak.
+The reason is that nothing about the code _looks_ different: a Prisma call in
+`ReportsProcessor` reads exactly like one in a controller, and the thing that makes the controller's
+version safe — the `TenantContextInterceptor` having opened a scope — is simply not there.
+
+`test/integration/reports-queue.int-spec.ts` states the premise rather than assuming it:
+
+```ts
+it('runs the worker with no ambient tenant scope', () => {
+  expect(currentScope()).toEqual({ kind: 'none' });
+});
+```
+
+If that ever came back as a tenant scope, carrying the actor in the payload could be dropped — and
+it must not be, so the assertion is what would notice.
+
+Everything the worker needs travels in the job, serialised through Redis as JSON: not just
+`tenantId`, but the whole `AuthenticatedUser`. The tenant opens the scope; the id and the role decide
+which rows belong in the file. A `REQUESTER`'s export must not contain another person's tickets, and
+the role is the only thing that says so.
+
+**The rows are gathered by paging `TicketsService.findAll`, not by a query written in the worker.**
+That costs one round trip per hundred rows and is worth it: `findAll` is where the visibility rule
+lives, so an export built through it cannot contain a ticket the requester could not have listed. A
+second `where` in the processor would be a second place for that rule to drift, and the drift would
+only ever be visible inside a file somebody downloads — the slowest possible way to find out.
+
+The suite seeds four tickets across two requesters and two companies for exactly this: an agent's
+export has three rows and never `B-one elsewhere`; the same request from a requester has two and
+never their colleague's.
+
+### The report row is written before the job is enqueued
+
+The other order has a race. A job whose report row does not exist yet fails on its first statement,
+and BullMQ retries it into the same failure until it gives up — a report stuck as a queue error with
+no row anywhere to explain it. Inserting first has no such window: the worst case is a row that
+stays `PENDING` because the enqueue failed, which is visible and recoverable.
+
+Failures are recorded **on the row and rethrown**. Only recording them would leave BullMQ thinking
+the job succeeded; only throwing would leave the client polling a report stuck in `PROCESSING`
+forever with nothing to explain it. The row and the queue disagreeing about what happened is worse
+than either being wrong.
+
+### The queue made a missing environment variable a boot failure, on purpose
+
+`REDIS_HOST`, `REDIS_PORT` and `REPORTS_MAX_ROWS` are validated in
+`src/config/env.validation.ts` now, and were not before. Until this queue existed nothing in the
+process opened a Redis connection, so an unset `REDIS_HOST` failed at nobody; now the application
+connects at boot, and an unset one should stop it there rather than surface as a job that is
+enqueued and never runs.
+
+That change has a consequence outside the application, and it is the kind that is found late: **the
+`docker` job's boot check feeds the container an explicit list of variables**, and a container
+missing `REDIS_HOST` exits on validation before it can answer the `curl`. The failure then reads as
+"the image did not answer on port 3000", which points at the build rather than at the missing
+variable. The three names are in that list now. Redis is already running on 6380 from
+`npm run test:setup`, and `--network host` is what makes it reachable.
+
+Verified locally the same way the job does it: `npm run build`, then `node dist/main` with
+`NODE_ENV=production` and the `.env.test` values, answering `GET /` while `BullModule` reported its
+dependencies initialised.
+
+One knock-on in the unit suite worth knowing: `env.validation.spec.ts` used `REDIS_HOST` as its
+example of an _undeclared_ variable that survives validation untouched. It is declared now, so the
+example moved to `POSTGRES_USER` — which only `docker-compose` reads and which nothing will ever
+declare.
+
+### The CSV is in a `TEXT` column, and `REPORTS_MAX_ROWS` is what bounds it
+
+MAIN.md calls for S3/MinIO and that remains the right answer; this is the scoped-down version, and
+the cap is the whole mitigation. It **truncates rather than failing**: a report that says "here are
+the first N" is more useful than one that refuses, and `rowCount` on the row tells the client what
+it actually got. `.env.test` sets it to 100 so the cap is assertable without seeding 50001 tickets.
+
+Every cell is quoted, including the header, rather than only the ones that need it. Conditional
+quoting means a rule about which characters are special, and getting that rule slightly wrong
+produces a file that opens fine until one ticket title contains a comma.
+
+The leading-character guard is not about CSV at all. A cell beginning with `=`, `+`, `-` or `@` is
+executed as a formula by Excel and Google Sheets, so a ticket titled `=cmd|...` becomes an injection
+against whoever opens the export. Prefixing a single quote is the standard defence and is invisible
+in the spreadsheet.
+
+`cell()` takes a narrow union rather than `unknown`, and that is deliberate: `String(someObject)`
+yields `"[object Object]"` without complaining, so a column added later that carries an object would
+land in a customer's spreadsheet rather than failing to compile.
 
 ### The staff room is what keeps a requester out of another ticket's events
 

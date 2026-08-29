@@ -269,23 +269,46 @@ marcar aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Fase 5 — Fila BullMQ e relatórios
 
-- [ ] `src/reports/` — module, service, controller, processor, response, dto
-- [ ] `BullModule.forRoot()` em `src/app.module.ts`
-- [ ] `POST /reports/tickets` responde **`202`** com o `Report` em `PENDING`
-- [ ] Worker abre `runWithTenant(job.data.tenantId, ...)` **antes de qualquer query**
-- [ ] `GET /reports`, `GET /reports/:id`, `GET /reports/:id/download` (`text/csv`, `409` se não
+- [x] `src/reports/` — module, service, controller, processor, response, dto
+- [x] `BullModule.forRoot()` em `src/app.module.ts`
+- [x] `POST /reports/tickets` responde **`202`** com o `Report` em `PENDING`
+- [x] Worker abre `runWithTenant(job.data.tenantId, ...)` **antes de qualquer query**
+- [x] `GET /reports`, `GET /reports/:id`, `GET /reports/:id/download` (`text/csv`, `409` se não
       `COMPLETED`)
-- [ ] `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` e `REPORTS_MAX_ROWS` em
+- [x] `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` e `REPORTS_MAX_ROWS` em
       `src/config/env.validation.ts`
-- [ ] `.env.example` e `.env.test` atualizados com `REPORTS_MAX_ROWS`
-- [ ] `.github/workflows/ci.yml` — `REDIS_*` no passo de boot do job `docker`, senão a validação de
+- [x] `.env.example` e `.env.test` atualizados com `REPORTS_MAX_ROWS`
+- [x] `.github/workflows/ci.yml` — `REDIS_*` no passo de boot do job `docker`, senão a validação de
       ambiente derruba o container antes do `curl`
 
 ### Verificação
 
-- [ ] `test/integration/reports-queue.int-spec.ts` — job enfileirado e processado contra o Redis de
+- [x] `test/integration/reports-queue.int-spec.ts` — job enfileirado e processado contra o Redis de
       teste, CSV correto, e nenhum vazamento com dado de outro tenant presente
-- [ ] `npm run test:all`
+- [x] `npm run test:all`
+
+### Não estava no plano
+
+- [x] **Relatório é pessoal**, e isso virou propriedade de segurança e não simplificação: o CSV é
+      montado pela visibilidade de quem pediu, então entregá-lo a outra pessoa daria linhas que as
+      rotas de ticket recusariam a ela. Relatório de terceiro responde 404, na mesma empresa ou não
+- [x] O worker pagina o `TicketsService.findAll` em vez de escrever query própria. Custa uma ida ao
+      banco a cada 100 linhas e paga: a regra de visibilidade tem uma casa só, e uma segunda `where`
+      no processor só apareceria errada dentro de um arquivo que alguém baixou
+- [x] A linha do relatório é criada **antes** de enfileirar. A ordem inversa tem corrida: um job cujo
+      registro ainda não existe falha na primeira instrução e o BullMQ o repete até desistir
+- [x] Falha é gravada na linha **e** relançada. Só gravar deixaria o BullMQ achando que deu certo;
+      só relançar deixaria o cliente esperando um `PROCESSING` eterno sem explicação
+- [x] Toda célula do CSV é aspeada e célula iniciada por `=`, `+`, `-` ou `@` ganha aspa simples —
+      planilha executa `=` como fórmula, então um título de chamado viraria injeção contra quem
+      abre o arquivo. Não estava previsto no plano
+- [x] `cell()` recebe união estreita em vez de `unknown`: o ESLint pegou que `String(objeto)` vira
+      `"[object Object]"` sem reclamar
+- [x] `env.validation.spec.ts` usava `REDIS_HOST` como exemplo de variável **não declarada** que
+      sobrevive à validação. Agora ela é declarada, então o exemplo passou a ser `POSTGRES_USER`
+- [x] Verificado localmente o que o job `docker` faz: `npm run build` e `node dist/main` com
+      `NODE_ENV=production` e os valores do `.env.test`, respondendo `GET /` com o `BullModule`
+      inicializado
 
 ---
 
