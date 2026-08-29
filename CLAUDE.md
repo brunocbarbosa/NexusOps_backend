@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NexusOps is a B2B multi-tenant SaaS backend for corporate automation and helpdesk, built as a
 portfolio project whose explicit goal is to solve senior-level engineering problems — not just to
-deliver CRUD features. `documents/MAIN.md` is the authoritative project specification (in
-Portuguese); read it before implementing anything architectural, since the "why" behind each
-technology choice is recorded there.
+deliver CRUD features. `documents/MAIN_BACKEND.md` is the authoritative backend specification and
+`documents/MAIN.md` is the product scope it serves (both in Portuguese); read them before
+implementing anything architectural, since the "why" behind each technology choice is recorded
+there.
 
 `src/tenancy/` is real, measured code and the load-bearing part of the project. `src/auth/` and
 `src/users/` are the first vertical built on it, `src/platform/` is the second — the single
@@ -21,7 +22,9 @@ Other documents, by purpose:
 
 | File                                         | Read it when                                                    |
 | -------------------------------------------- | --------------------------------------------------------------- |
-| `documents/MAIN.md`                          | implementing anything architectural — the spec                  |
+| `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec          |
+| `documents/MAIN.md`                          | you need the product scope the backend serves                   |
+| `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime        |
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
 | `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
 | `documents/important/`                       | the deep references below — kept together so they stay findable |
@@ -36,7 +39,10 @@ error — and the measured behaviour behind it; read it before editing `src/auth
 a DTO in any module, and hand Part I to whoever writes the frontend), `PLATFORM.md` (the platform
 operator, in the same two parts: the company and company-user API a console integrates against, and
 the measured behaviour behind it — why the operator lives in a reserved tenant, why `isPlatform` is
-`Boolean?`, and the escalation the new enum value opened; read it before editing `src/platform/`) and `RLS_NOTES.md` (Row-Level
+`Boolean?`, and the escalation the new enum value opened; read it before editing `src/platform/`),
+`HELPDESK.md` (the helpdesk slice — tickets, comments, the audit trail, the report queue and the
+notification gateway — in the same two parts; **still being written**, one pull request at a time,
+so an empty section there means not-yet rather than nothing-to-say) and `RLS_NOTES.md` (Row-Level
 Security, **not implemented yet**: the four steps that remain and how to check whether it is
 actually enforcing anything, plus the two traps measured here). They live together so that detail nobody needs today
 does not get lost.
