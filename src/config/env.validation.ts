@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsEnum,
   IsInt,
+  IsOptional,
   IsString,
   Matches,
   Max,
@@ -87,6 +88,35 @@ export class EnvironmentVariables {
   @Min(4)
   @Max(31)
   BCRYPT_SALT_ROUNDS: number;
+
+  // Read by BullMQ, which is why they are validated here now and were not
+  // before: until the report queue existed, nothing in the process opened a
+  // Redis connection, and an unset REDIS_HOST failed at nobody. Now the
+  // application connects at boot, so a missing value should stop it there
+  // rather than surface as a job that is enqueued and never runs.
+  @IsString()
+  @MinLength(1)
+  REDIS_HOST: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  REDIS_PORT: number;
+
+  // Optional, and genuinely so: the local and CI stacks run Redis with no
+  // password, and requiring one would mean inventing a value for a container
+  // that ignores it.
+  @IsOptional()
+  @IsString()
+  REDIS_PASSWORD?: string;
+
+  // The ceiling on one CSV export. The report body is stored in a TEXT column
+  // rather than in object storage, so this is what keeps a single row from
+  // growing without bound — see documents/important/HELPDESK.md.
+  @IsInt()
+  @Min(1)
+  @Max(1000000)
+  REPORTS_MAX_ROWS: number;
 
   // The single platform operator. Seeded into the reserved platform tenant at
   // boot by PlatformBootstrapService, which is why these are required rather

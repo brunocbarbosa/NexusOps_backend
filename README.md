@@ -44,19 +44,21 @@ That principle is what the code below is actually about.
 
 This is an in-progress portfolio project, and the README says exactly where it stands.
 
-| Area                                   | Status         | Notes                                                                          |
-| -------------------------------------- | -------------- | ------------------------------------------------------------------------------ |
-| Tenant isolation (`src/tenancy/`)      | ✅ Implemented | Prisma Client Extension + `AsyncLocalStorage`, covered by 19 isolation tests   |
-| Data model & migrations                | ✅ Implemented | 6 models, composite foreign keys, tenant-leading indexes                       |
-| Three-tier test infrastructure         | ✅ Implemented | unit / integration / e2e, with an ephemeral Postgres + Redis stack             |
-| CI/CD pipeline                         | ✅ Implemented | 7 jobs, branch rulesets, CodeQL, SonarCloud gate, GHCR image                   |
-| Production Docker image                | ✅ Implemented | Multi-stage, non-root, pruned 778 MB → 406 MB, smoke-tested against a DB       |
-| Row-Level Security (defense in depth)  | 🔬 Researched  | Behaviour measured and documented; policies and app role not written yet       |
-| Auth (JWT + RBAC)                      | ✅ Implemented | Global `JwtAuthGuard` + `RolesGuard`; refresh tokens signed with their own key |
-| Users module (`src/users/`)            | ✅ Implemented | The first vertical on the tenancy layer: CRUD, RBAC, cross-tenant id gives 404 |
-| Platform operator (`src/platform/`)    | ✅ Implemented | One `ADMIN_MASTER` seeded from the environment; company + company-user CRUDs   |
-| Ticket and comment modules             | 🚧 Planned     | Modelled in the schema; no domain module beyond users is written yet           |
-| Audit trail, BullMQ queues, WebSockets | 🚧 Planned     | Designed and modelled in the schema; modules not written yet                   |
+| Area                                  | Status         | Notes                                                                          |
+| ------------------------------------- | -------------- | ------------------------------------------------------------------------------ |
+| Tenant isolation (`src/tenancy/`)     | ✅ Implemented | Prisma Client Extension + `AsyncLocalStorage`, covered by 19 isolation tests   |
+| Data model & migrations               | ✅ Implemented | 8 models, composite foreign keys, tenant-leading indexes                       |
+| Three-tier test infrastructure        | ✅ Implemented | unit / integration / e2e, with an ephemeral Postgres + Redis stack             |
+| CI/CD pipeline                        | ✅ Implemented | 7 jobs, branch rulesets, CodeQL, SonarCloud gate, GHCR image                   |
+| Production Docker image               | ✅ Implemented | Multi-stage, non-root, pruned 778 MB → 406 MB, smoke-tested against a DB       |
+| Row-Level Security (defense in depth) | 🔬 Researched  | Behaviour measured and documented; policies and app role not written yet       |
+| Auth (JWT + RBAC)                     | ✅ Implemented | Global `JwtAuthGuard` + `RolesGuard`; refresh tokens signed with their own key |
+| Users module (`src/users/`)           | ✅ Implemented | The first vertical on the tenancy layer: CRUD, RBAC, cross-tenant id gives 404 |
+| Platform operator (`src/platform/`)   | ✅ Implemented | One `ADMIN_MASTER` seeded from the environment; company + company-user CRUDs   |
+| Tickets and comments                  | ✅ Implemented | Per-tenant ticket numbers, optimistic concurrency, per-role visibility         |
+| Reactive audit trail                  | ✅ Implemented | Domain events via `@nestjs/event-emitter`; no service calls the audit module   |
+| Asynchronous exports (BullMQ)         | ✅ Implemented | `202 Accepted`, worker re-establishes the tenant from the job payload          |
+| Real-time notifications               | ✅ Implemented | socket.io gateway; per-user and staff-only rooms enforce the visibility rule   |
 
 ---
 
@@ -355,35 +357,41 @@ test/
   jest.base.js              # shared rootDir, so the three tiers' lcov paths stay comparable
 scripts/
   docker-smoke.js           # runs inside the image, against a live DB
-documents/                  # project documentation (Portuguese)
+documents/                  # project documentation (see the note below on language)
 ```
 
 ---
 
 ## Documentation
 
-Project documentation is written in Portuguese; the code and its comments are in English.
+The code and its comments are in English, and so is everything under `documents/important/` — the measured references. `documents/MAIN*.md`, `documents/study/` and `documents/helpdesk/` are in Portuguese: scope, teaching guides and execution records.
 
-| Document                                                                               | What it covers                                                      |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`documents/MAIN.md`](documents/MAIN.md)                                               | The authoritative specification — the "why" behind each technology  |
-| [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md) | Measured Prisma 7.9.1 behaviour the tenant extension depends on     |
-| [`documents/important/RLS_NOTES.md`](documents/important/RLS_NOTES.md)                 | Row-Level Security research, including two traps measured firsthand |
-| [`documents/study/GUIA_CI_CD.md`](documents/study/GUIA_CI_CD.md)                       | The CI/CD setup explained from first principles                     |
-| [`CLAUDE.md`](CLAUDE.md)                                                               | Working agreements and traps, for both humans and AI agents         |
+| Document                                                                                       | What it covers                                                      |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`documents/MAIN.md`](documents/MAIN.md)                                                       | The authoritative specification — the "why" behind each technology  |
+| [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md)         | Measured Prisma 7.9.1 behaviour the tenant extension depends on     |
+| [`documents/important/HELPDESK.md`](documents/important/HELPDESK.md)                           | The helpdesk API contract, and the behaviour measured behind it     |
+| [`documents/helpdesk/GUIA_FRONTEND_HELPDESK.md`](documents/helpdesk/GUIA_FRONTEND_HELPDESK.md) | What a Next.js client has to decide because of this API             |
+| [`documents/important/RLS_NOTES.md`](documents/important/RLS_NOTES.md)                         | Row-Level Security research, including two traps measured firsthand |
+| [`documents/study/GUIA_CI_CD.md`](documents/study/GUIA_CI_CD.md)                               | The CI/CD setup explained from first principles                     |
+| [`CLAUDE.md`](CLAUDE.md)                                                                       | Working agreements and traps, for both humans and AI agents         |
 
 ---
 
 ## Roadmap
 
-- [ ] Auth module — JWT with the tenant in the payload, Passport, bcrypt, RBAC
+- [x] Auth module — JWT with the tenant in the payload, Passport, bcrypt, RBAC
+- [x] Ticket module with optimistic concurrency enforced end to end
+- [x] Audit module listening on domain events
+- [x] BullMQ queues and workers, with tenant context re-established from the job payload
+- [x] WebSockets gateway for job-completion notifications
 - [ ] Row-Level Security — policies, a low-privilege application role, and `set_config` inside an
       interactive transaction (setting the tenant outside one lands on a different pooled
       connection than the query, which under concurrency serves another tenant's rows)
-- [ ] Ticket module with optimistic concurrency enforced end to end
-- [ ] Audit module listening on domain events
-- [ ] BullMQ queues and workers, with tenant context re-established from the job payload
-- [ ] WebSockets gateway for job-completion notifications
+- [ ] Object storage for report files and ticket attachments, replacing the `TEXT` column the CSV
+      lives in today
+- [ ] Durable audit delivery — the trail is written after the response, so a failed insert leaves it
+      behind the data
 - [ ] Merged coverage across the three tiers, plus a Jest `coverageThreshold`
 - [ ] Deploy job consuming the image from GHCR
 

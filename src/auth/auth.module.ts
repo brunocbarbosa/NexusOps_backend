@@ -50,6 +50,10 @@ import { RefreshTokenService } from './refresh-token.service';
   // Exported for the users module: hashing a password in a second place would
   // duplicate the cost configuration, and deactivating a user or changing a
   // password has to end that user's sessions.
-  exports: [HashingService, RefreshTokenService],
+  //
+  // JwtModule goes out too, for the WebSocket gateway: the handshake verifies
+  // the same access token as the HTTP side, and registering a second JwtModule
+  // there would be a second place to keep the secret and the expiry in step.
+  exports: [HashingService, RefreshTokenService, JwtModule],
 })
 export class AuthModule {}

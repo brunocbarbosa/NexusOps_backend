@@ -1,41 +1,82 @@
-1. Visão Geral:
-   O NexusOps é uma plataforma SaaS B2B de automação corporativa e gestão de chamados (helpdesk). O sistema permite que diferentes empresas (tenants) gerenciem seus fluxos internos de trabalho de forma isolada, segura e com alta performance. O foco deste projeto de portfólio não é apenas a funcionalidade, mas sim resolver desafios complexos de engenharia de software de nível sênior.
+# NexusOps — Visão geral do projeto
 
-2. Tecnologias:
-   2.1. Linguagem e Framework Base
+Documento de escopo e de intenção técnica do produto.
+O plano do frontend está em
+[`GUIA_FRONTEND_HELPDESK.md`](./helpdesk/GUIA_FRONTEND_HELPDESK.md); o comportamento já medido da
+API está em [`documents/important/`](./important/README.md).
 
-- Node.js com NestJS (TypeScript): O framework principal escolhido por forçar uma arquitetura limpa (Módulos, Injeção de Dependência) que é muito valorizada no mercado corporativo.
+## O escopo do projeto
 
-2.2. Banco de Dados e ORM
+Uma plataforma **SaaS B2B** onde empresas se cadastram (**Tenants**) para gerenciar:
 
-- PostgreSQL: Banco de dados relacional ideal para dados complexos e essencial para a estratégia de multi-tenancy no modelo Shared Database, Shared Schema. Ele também será usado para aplicar o Row-Level Security (RLS) nativo.
-- Prisma: O ORM (Object-Relational Mapper) escolhido pela sua excelente sinergia com o TypeScript e tipagem estrita de ponta a ponta. Utilizaremos o Prisma Client Extensions para injetar o filtro de isolamento de dados automaticamente nas queries.
+- **Chamados internos de TI** — o helpdesk.
+- **Controle de ativos** — notebooks, licenças.
+- **Auditoria** — o histórico de quem alterou o quê.
 
-2.3. Filas, Cache e Processamento Assíncrono
+---
 
-- Redis: Servirá como banco de dados em memória, atuando tanto para cache de permissões da aplicação quanto como base de infraestrutura para o sistema de filas.
-- BullMQ: Biblioteca de mensageria que rodará sobre o Redis. Será responsável por gerenciar os workers e processar tarefas pesadas em background (como geração de relatórios), evitando que o Event Loop principal da API fique travado.
+## 1. Arquitetura e stack tecnológico
 
-2.4. Comunicação Real-time e Eventos
+A escolha das ferramentas tem propósito claro de **escalabilidade e manutenibilidade**.
 
-- NestJS WebSockets Gateway: Para gerenciar a comunicação bidirecional com o frontend em tempo real, notificando os usuários quando um job (como um upload de arquivo) for concluído.
-- @nestjs/event-emitter: Biblioteca para implementar o padrão Observer (orientação a eventos). Será usada especificamente para o módulo de auditoria, escutando as mutações e salvando os logs no banco de forma desacoplada da regra de negócios.
+| Camada             | Escolha                                  | Motivo                                                            |
+| ------------------ | ---------------------------------------- | ----------------------------------------------------------------- |
+| Backend            | Node.js com NestJS (TypeScript)          | Força arquitetura limpa: injeção de dependências, módulos         |
+| Banco de dados     | PostgreSQL                               | Dados relacionais complexos e base da estratégia de multi-tenancy |
+| Cache e filas      | Redis + RabbitMQ (ou BullMQ sobre Redis) | Processamento assíncrono; BullMQ simplifica a infra inicial       |
+| Frontend           | React (Next.js) + TypeScript             | Roteamento avançado e tipagem ponta a ponta                       |
+| Estado de servidor | TanStack Query                           | Cache local e sincronização com a API                             |
+| Tabelas            | TanStack Table                           | Data grids complexos                                              |
+| UI                 | Tailwind CSS + Radix UI ou Shadcn/ui     | Acessibilidade e Design System sem escrever CSS do zero           |
 
-2.5. Segurança e Isolamento de Contexto
+---
 
-- AsyncLocalStorage (do Node.js): Para armazenar o tenant_id e outras informações do usuário autenticado no escopo global e isolado de cada requisição HTTP.
-- JWT (JSON Web Tokens): Para a camada de autenticação, carregando o ID do tenant diretamente no payload.
+## 2. Os diferenciais de senioridade
 
-2.6. Infraestrutura e DevOps
+É onde está a maior parte do esforço do projeto — e o que o README e a entrevista devem destacar.
 
-- Docker e Docker Compose: Essenciais para a fundação do projeto, permitindo orquestrar e subir rapidamente os containers das dependências locais da aplicação, como o PostgreSQL e o Redis.
-- CI/CD: Práticas de integração e entrega contínuas para preparar toda a infraestrutura para o deploy na nuvem.
+### A. Multi-tenancy: isolamento de dados
 
-3. Arquitetura
-   O sistema foi desenhado para contornar problemas reais de escalabilidade e segurança:
+**O desafio.** Garantir que o "Cliente A" nunca veja um chamado do "Cliente B" por um erro no código.
+Não basta um campo `tenant_id` espalhado pelas tabelas de forma ingênua.
 
-- Multi-tenancy e Isolamento de Dados: Utiliza a abordagem Shared Database, Shared Schema. O isolamento é garantido globalmente no backend através do AsyncLocalStorage e extensões do Prisma, além da aplicação de Row-Level Security (RLS) nativa no PostgreSQL.
-- Controle Otimista de Concorrência: Previne race conditions (condições de corrida) em chamados simultâneos utilizando uma coluna de versão, bloqueando atualizações conflitantes e garantindo a consistência dos dados.
-- Trilha de Auditoria Reativa (Audit Trail): Uma arquitetura orientada a eventos (padrão Observer) desacopla a regra de negócios da auditoria. Toda mutação no banco gera um evento que é salvo na tabela de logs usando o formato flexível JSONB.
-- Processamento Assíncrono: Tarefas pesadas que travariam o Event Loop do Node.js (como geração de relatórios) são enviadas para uma fila gerenciada pelo Redis e BullMQ.
-- Notificações em Tempo Real: Workers processam as tarefas em background e o backend notifica o cliente instantaneamente sobre a conclusão via WebSockets.
+**A solução.** Row-Level Security (RLS) no próprio PostgreSQL, ou um middleware robusto no NestJS que
+injeta o `tenant_id` automaticamente no contexto global da requisição (via `AsyncLocalStorage` do
+Node), garantindo que nenhuma query chegue ao banco sem esse filtro.
+
+> Estado atual no backend: a extensão de tenancy existe e está medida em
+> [`TENANCY_EXTENSION.md`](./important/TENANCY_EXTENSION.md); o RLS ainda **não** foi implementado —
+> as notas e as duas armadilhas medidas estão em [`RLS_NOTES.md`](./important/RLS_NOTES.md).
+
+### B. Controle de concorrência (race conditions)
+
+**O desafio.** Dois analistas tentando pegar o mesmo chamado simultaneamente.
+
+**A solução.** _Optimistic Concurrency Control_ com uma coluna `version`. Se o Analista A e o
+Analista B abrem o ticket na versão 1 e A salva primeiro (indo para a versão 2), B recebe
+**409 Conflict** ao tentar salvar, informando que os dados foram alterados por outro usuário.
+
+### C. Processamento assíncrono e mensageria
+
+**O desafio.** Gerar um relatório em PDF de todos os chamados do ano trava o Event Loop do Node.js.
+
+**A solução.** A API responde **202 Accepted** e joga o trabalho para uma fila (RabbitMQ/BullMQ). Um
+_worker_ separado gera o PDF, faz upload para um bucket S3 (ou MinIO local) e dispara um evento. O
+frontend, ouvindo via Server-Sent Events ou WebSockets, avisa: _"Seu relatório está pronto para
+download"_.
+
+### D. Trilha de auditoria (audit trail)
+
+**O desafio.** Sistemas corporativos precisam saber quem alterou o quê.
+
+**A solução.** Toda mutação (create, update, delete) gera um registro em `audit_logs` — por exemplo,
+_"Usuário X alterou o status de 'Aberto' para 'Em Progresso' no Ticket Y"_. No frontend, isso é
+renderizado como a **timeline** do chamado.
+
+### E. Frontend de alta performance
+
+**O desafio.** A tela de "Todos os Chamados" de uma empresa grande pode ter dezenas de milhares de
+registros; renderizar tudo no DOM quebra a página.
+
+**A solução.** Virtualização de listas com `@tanstack/react-virtual`: o DOM renderiza apenas as ~20
+linhas visíveis, trocando os dados conforme o scroll.
