@@ -10,6 +10,9 @@ describe('validateEnv', () => {
     JWT_REFRESH_SECRET: 'a-different-secret-long-enough',
     JWT_REFRESH_EXPIRES_IN: '7d',
     BCRYPT_SALT_ROUNDS: '4',
+    REDIS_HOST: 'localhost',
+    REDIS_PORT: '6379',
+    REPORTS_MAX_ROWS: '100',
     ADMIN_MASTER_EMAIL: 'operator@nexusops.test',
     ADMIN_MASTER_PASSWORD: 'a-long-enough-operator-password',
   };
@@ -25,15 +28,33 @@ describe('validateEnv', () => {
 
     expect(result.PORT).toBe(3000);
     expect(result.BCRYPT_SALT_ROUNDS).toBe(4);
+    expect(result.REDIS_PORT).toBe(6379);
+    expect(result.REPORTS_MAX_ROWS).toBe(100);
   });
 
-  // Variables belonging to docker-compose and BullMQ are not declared on the
-  // class. Stripping them would make ConfigService.get return undefined for
-  // variables that are plainly set.
+  // Variables belonging to docker-compose are not declared on the class.
+  // Stripping them would make ConfigService.get return undefined for variables
+  // that are plainly set. REDIS_HOST used to be the example here; it is
+  // declared now that BullMQ opens a connection at boot, so POSTGRES_USER —
+  // which only docker-compose reads — took its place.
   it('passes undeclared variables through untouched', () => {
-    const result = validateEnv({ ...valid, REDIS_HOST: 'localhost' });
+    const result = validateEnv({ ...valid, POSTGRES_USER: 'nexusops' });
 
-    expect(result.REDIS_HOST).toBe('localhost');
+    expect(result.POSTGRES_USER).toBe('nexusops');
+  });
+
+  // The queue connects at boot now, so an unset host has to stop the process
+  // rather than surface later as a job that is enqueued and never runs.
+  it('rejects a missing REDIS_HOST', () => {
+    const incomplete: Record<string, string> = { ...valid };
+    delete incomplete.REDIS_HOST;
+
+    expect(() => validateEnv(incomplete)).toThrow(/REDIS_HOST/);
+  });
+
+  // Optional and genuinely so: the local and CI stacks run Redis without one.
+  it('accepts an absent REDIS_PASSWORD', () => {
+    expect(() => validateEnv(valid)).not.toThrow();
   });
 
   it('rejects a missing variable', () => {

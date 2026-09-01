@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsOptional,
@@ -14,6 +14,13 @@ const trim = ({ value }: { value: unknown }): unknown =>
 
 const normalise = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim().toLowerCase() : value;
+
+const asOptionalBoolean = ({ value }: { value: unknown }): unknown => {
+  if (value === undefined) return undefined;
+  if (value === 'true' || value === true) return true;
+  if (value === 'false' || value === false) return false;
+  return value;
+};
 
 const HOSTNAME =
   /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
@@ -46,7 +53,24 @@ export class UpdateCompanyDto {
   @Transform(normalise)
   domain?: string;
 
+  /**
+   * The suspend switch, and the reason this file carries the same three
+   * decorators the query DTOs do.
+   *
+   * `enableImplicitConversion` converts by the property's declared type rather
+   * than by the value's, and it does that in a JSON body just as much as in a
+   * query string — measured, not assumed. `Boolean('false')` is `true`, so
+   * `{"isActive": "false"}` used to **reactivate** the company the caller was
+   * asking to suspend, with a 200 and no way to notice. `@Type(() => String)`
+   * redirects the conversion so the raw value reaches `@Transform`, which maps
+   * the two strings that mean something and hands anything else back for
+   * `@IsBoolean()` to reject.
+   *
+   * `update-company.dto.spec.ts` is the guard.
+   */
   @IsOptional()
   @IsBoolean()
+  @Transform(asOptionalBoolean)
+  @Type(() => String)
   isActive?: boolean;
 }
