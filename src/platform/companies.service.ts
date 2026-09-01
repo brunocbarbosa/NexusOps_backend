@@ -48,7 +48,7 @@ export class CompaniesService {
   ) {}
 
   /**
-   * Creates a company and its first ADMIN, in one transaction.
+   * Creates a company, its first ADMIN and its ticket counter, in one transaction.
    *
    * This is the transaction that used to be `AuthService.register`, moved rather
    * than rewritten when company creation became the operator's job. The delicate
@@ -70,15 +70,23 @@ export class CompaniesService {
             data: { name: dto.name, domain: dto.domain },
           });
 
-          const admin = await runWithTenant(tenant.id, () =>
-            tx.user.create({
+          const admin = await runWithTenant(tenant.id, async () => {
+            // The row the ticket sequence increments. Created with the company
+            // rather than upserted when the first ticket is opened: two
+            // concurrent first opens would both find it missing, both insert,
+            // and one would die on the primary key. Created here also means the
+            // increment can be a plain update, which is what lets the tenancy
+            // extension supply the filter instead of the service naming a tenant.
+            await tx.ticketCounter.create({ data: tenantScoped({}) });
+
+            return tx.user.create({
               data: tenantScoped({
                 email: dto.admin.email,
                 passwordHash,
                 role: UserRole.ADMIN,
               }),
-            }),
-          );
+            });
+          });
 
           return {
             company: toCompanyResponse(tenant),
