@@ -378,6 +378,14 @@ jobs:
           # The step is stronger for it. It stopped being only "the build emitted
           # something" and became "the image boots against a real database and
           # provisions its operator".
+          #
+          # REDIS_* joined the list for the same reason DATABASE_URL did: the
+          # report queue opens a Redis connection at boot, and env.validation
+          # now refuses a missing host — so without these the container exits
+          # before it can answer the curl, and the failure reads as "the image
+          # did not answer" rather than as the missing variable it is. Redis is
+          # already up on 6380 from `npm run test:setup`, reachable because of
+          # --network host.
           set -a
           . ./.env.test
           set +a
@@ -391,6 +399,9 @@ jobs:
             -e BCRYPT_SALT_ROUNDS="$BCRYPT_SALT_ROUNDS" \
             -e ADMIN_MASTER_EMAIL="$ADMIN_MASTER_EMAIL" \
             -e ADMIN_MASTER_PASSWORD="$ADMIN_MASTER_PASSWORD" \
+            -e REDIS_HOST="$REDIS_HOST" \
+            -e REDIS_PORT="$REDIS_PORT" \
+            -e REPORTS_MAX_ROWS="$REPORTS_MAX_ROWS" \
             "$IMAGE_REF"
           for i in $(seq 1 30); do
             if curl -fsS localhost:3000 > /dev/null; then
