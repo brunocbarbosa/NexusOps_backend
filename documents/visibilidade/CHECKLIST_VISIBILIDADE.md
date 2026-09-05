@@ -26,14 +26,14 @@ aqui → commit → parar e perguntar antes da próxima fase.
 
 ## Progresso por fase
 
-| Fase                           | Estado      | Commit |
-| ------------------------------ | ----------- | ------ |
-| 0 — Branch e documentos        | ⏳ em curso | —      |
-| 1 — O escopo                   | ⏳ pendente | —      |
-| 2 — Os guards                  | ⏳ pendente | —      |
-| 3 — Eventos e WebSocket        | ⏳ pendente | —      |
-| 4 — Documentação de referência | ⏳ pendente | —      |
-| 5 — O plano de frontend        | ⏳ pendente | —      |
+| Fase                           | Estado       | Commit    |
+| ------------------------------ | ------------ | --------- |
+| 0 — Branch e documentos        | ✅ concluída | `a389b2d` |
+| 1 — O escopo                   | ✅ concluída | —         |
+| 2 — Os guards                  | ⏳ pendente  | —         |
+| 3 — Eventos e WebSocket        | ⏳ pendente  | —         |
+| 4 — Documentação de referência | ⏳ pendente  | —         |
+| 5 — O plano de frontend        | ⏳ pendente  | —         |
 
 ---
 
@@ -69,52 +69,63 @@ O coração da mudança, e a fase de maior raio: quase todo o custo de teste est
 
 ### `src/tickets/ticket-visibility.ts`
 
-- [ ] `seesEveryTicket()` passa a ser `role === UserRole.ADMIN` — mesmo nome e mesma assinatura,
+- [x] `seesEveryTicket()` passa a ser `role === UserRole.ADMIN` — mesmo nome e mesma assinatura,
       porque a pergunta não mudou, só a resposta
-- [ ] `ticketsInvolving(userId)` criado, devolvendo `{ OR: [{ requesterId }, { assigneeId }] }`
-- [ ] Docblocks reescritos: por que o agente saiu, que o custo é declarado (ninguém além do `ADMIN`
+- [x] `ticketsInvolving(userId)` criado, devolvendo `{ OR: [{ requesterId }, { assigneeId }] }`
+- [x] Docblocks reescritos: por que o agente saiu, que o custo é declarado (ninguém além do `ADMIN`
       vê um chamado sem responsável, e é por isso que atribuir virou rota de admin), e que
       `ADMIN_MASTER` continua ausente pelo motivo de sempre
 
 ### `src/tickets/tickets.service.ts`
 
-- [ ] `visibleTo()` devolve `{}` para o admin e `{ AND: [ticketsInvolving(id)] }` para o resto
-- [ ] **Confirmado que `load()` não muda uma linha** — `{ id, ...visibleTo() }` vira
+- [x] `visibleTo()` devolve `{}` para o admin e `{ AND: [ticketsInvolving(id)] }` para o resto
+- [x] **Confirmado que `load()` não muda uma linha** — `{ id, ...visibleTo() }` vira
       `{ id, AND: [...] }`, e o chokepoint dos 404 não precisa ser editado
-- [ ] Comentário do `findAll` (`:169`) reescrito: `AND` porque o `search` já ocupa a chave `OR`, e
+- [x] Comentário do `findAll` (`:169`) reescrito: `AND` porque o `search` já ocupa a chave `OR`, e
       um segundo `OR` apagaria o primeiro **alargando** a página
-- [ ] Docblock da classe (`:61-64`) reescrito — o truque de "espalhar por último" deixou de existir
-- [ ] Docblock de `load()` (`:322-333`) — "outro requester" vira "quem não abriu nem está atendendo"
+- [x] Docblock da classe (`:61-64`) reescrito — o truque de "espalhar por último" deixou de existir
+- [x] Docblock de `load()` (`:322-333`) — "outro requester" vira "quem não abriu nem está atendendo"
 
 ### `src/tickets/dto/query-tickets.dto.ts`
 
-- [ ] Comentário do `requesterId` (`:72-74`) reescrito: interseção, não sobrescrita
+- [x] Comentário do `requesterId` (`:72-74`) reescrito: interseção, não sobrescrita
 
 ### Testes
 
-- [ ] `src/tickets/ticket-visibility.spec.ts` (novo) — `seesEveryTicket` sim para `ADMIN` e **não
+- [x] `src/tickets/ticket-visibility.spec.ts` (novo) — `seesEveryTicket` sim para `ADMIN` e **não
       para `AGENT`**, que é a asserção que importa; `ticketsInvolving` com os dois braços
-- [ ] `tickets.service.spec.ts` — fixture `admin` adicionada; `:176`, `:185` (vira dois testes),
+- [x] `tickets.service.spec.ts` — fixture `admin` adicionada; `:176`, `:185` (vira dois testes),
       `:196` (interseção), `:207` (ator → admin) e `describe('assign')` (ator → admin)
-- [ ] `tickets.service.spec.ts` — novo: o escopo **não apaga o `OR` do `search`**
-- [ ] `test/integration/tickets-tenancy.int-spec.ts` — `:133` e `:150`; novos: o agente vê no
+- [x] `tickets.service.spec.ts` — novo: o escopo **não apaga o `OR` do `search`**
+- [x] `test/integration/tickets-tenancy.int-spec.ts` — `:133` e `:150`; novos: o agente vê no
       instante em que é atribuído e some quando deixa de ser, e o chamado legado aberto pelo próprio
       agente continua visível a ele
-- [ ] `test/integration/ticket-occ.int-spec.ts` — atribuir no `open()`; hoje quebra inteiro
-- [ ] `test/integration/audit-trail.int-spec.ts` — atribuir no setup
-- [ ] `test/integration/reports-queue.int-spec.ts` — `seed()` ganha um `ADMIN`, atores company-wide
+- [x] `test/integration/ticket-occ.int-spec.ts` — atribuir no `open()`; hoje quebra inteiro
+- [x] `test/integration/audit-trail.int-spec.ts` — atribuir no setup
+- [x] `test/integration/reports-queue.int-spec.ts` — `seed()` ganha um `ADMIN`, atores company-wide
       trocados; novo: o export do agente traz só os atribuídos
-- [ ] `test/e2e/tickets.e2e-spec.ts` — `describe('visibility')` inteiro, helper `assign()` criado
-- [ ] `test/e2e/comments.e2e-spec.ts` — atribuir onde `agentA` age; novo: 404 na thread e abertura
+- [x] `test/e2e/tickets.e2e-spec.ts` — `describe('visibility')` inteiro, helper `assign()` criado
+- [x] `test/e2e/comments.e2e-spec.ts` — atribuir onde `agentA` age; novo: 404 na thread e abertura
       no instante da atribuição
-- [ ] `test/e2e/audit.e2e-spec.ts` — `:145`, `:175`, e `:192` ganha o agente não atribuído
-- [ ] `test/e2e/reports.e2e-spec.ts` — atribuir no `beforeAll`
+- [x] `test/e2e/audit.e2e-spec.ts` — `:145`, `:175`, e `:192` ganha o agente não atribuído
+- [x] `test/e2e/reports.e2e-spec.ts` — atribuir no `beforeAll`
+
+### Não estava no plano
+
+- [x] `test/e2e/reports.e2e-spec.ts` também quebrou, e o plano não o listava na Fase 1: seus
+      relatórios são pedidos como agente esperando linhas. O `as()` daquele arquivo só tinha `get` e
+      `post`, então ganhou `patch` para poder atribuir no `beforeAll`
+- [x] `ticket-occ.int-spec.ts` tinha um `toThrow(/version 2/)` literal. Com o ticket já atribuído no
+      setup ele nasce na versão 2, e a mensagem passou a dizer 3 — a asserção virou derivada de
+      `ticket.version`, que é o que ela sempre quis dizer
+- [x] As contagens da trilha subiram de 2/1 para 3/2 e de 2 para 3 e 4 entradas: atribuir escreve um
+      `assigned` no trail. A diferença entre as duas visões continua sendo exatamente a nota interna
 
 ### Verificação
 
-- [ ] `npm run test:all` verde
-- [ ] `npm run typecheck` — os dois `tsconfig`
-- [ ] `npx eslint "src/**/*.ts"` sem `--fix`
+- [x] `npm run test:all` verde — 216 unit, 95 integração, 156 e2e
+- [x] `npm run typecheck` — os dois `tsconfig`
+- [x] `npx eslint "src/**/*.ts"` sem `--fix`
 
 ---
 

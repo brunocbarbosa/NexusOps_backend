@@ -56,6 +56,10 @@ describe('Reports (e2e)', () => {
       http().get(url).set('Authorization', `Bearer ${session.accessToken}`),
     post: (url: string) =>
       http().post(url).set('Authorization', `Bearer ${session.accessToken}`),
+    // Not for a report route: the fixtures need an assignment, because an
+    // agent exports what it is working and nothing else.
+    patch: (url: string) =>
+      http().patch(url).set('Authorization', `Bearer ${session.accessToken}`),
   });
 
   let operator: AuthBody;
@@ -131,10 +135,20 @@ describe('Reports (e2e)', () => {
       UserRole.REQUESTER,
     );
 
-    await as(requesterA)
-      .post('/tickets')
-      .send({ title: 'A urgent one', priority: TicketPriority.URGENT })
-      .expect(201);
+    // Opened by the requester and handed to the agent, because an agent's
+    // export is scoped to what it is working: unassigned, this ticket would be
+    // absent from every agent report below and the assertions would be about
+    // nothing.
+    const urgent = bodyOf<{ id: string; version: number }>(
+      await as(requesterA)
+        .post('/tickets')
+        .send({ title: 'A urgent one', priority: TicketPriority.URGENT })
+        .expect(201),
+    );
+    await as(adminA)
+      .patch(`/tickets/${urgent.id}/assignee`)
+      .send({ version: urgent.version, assigneeId: agentA.user.id })
+      .expect(200);
     await as(requesterB)
       .post('/tickets')
       .send({ title: 'B elsewhere' })
@@ -184,10 +198,16 @@ describe('Reports (e2e)', () => {
   });
 
   it('quotes every cell, so a title with a comma survives', async () => {
-    await as(requesterA)
-      .post('/tickets')
-      .send({ title: 'Printer, scanner and fax are down' })
-      .expect(201);
+    const comma = bodyOf<{ id: string; version: number }>(
+      await as(requesterA)
+        .post('/tickets')
+        .send({ title: 'Printer, scanner and fax are down' })
+        .expect(201),
+    );
+    await as(adminA)
+      .patch(`/tickets/${comma.id}/assignee`)
+      .send({ version: comma.version, assigneeId: agentA.user.id })
+      .expect(200);
 
     const accepted = bodyOf<ReportBody>(
       await as(agentA).post('/reports/tickets').send({}).expect(202),

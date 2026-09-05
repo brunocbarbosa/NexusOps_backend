@@ -67,6 +67,13 @@ const agent: AuthenticatedUser = {
   role: UserRole.AGENT,
 };
 
+const admin: AuthenticatedUser = {
+  id: 'user-4',
+  tenantId: TENANT,
+  email: 'admin@example.com',
+  role: UserRole.ADMIN,
+};
+
 /**
  * The service against a mocked Prisma, inside a real tenant scope.
  *
@@ -173,46 +180,85 @@ describe('TicketsService', () => {
       expect(countArgs.where).not.toHaveProperty('tenantId');
     });
 
-    it('confines a requester to their own tickets', async () => {
+    it('confines a requester to the tickets they are part of', async () => {
       await inTenant(() => tickets.findAll(query(), requester));
 
       const [countArgs] = prisma.ticket.count.mock.calls[0] as [
-        { where: { requesterId?: string } },
+        { where: { AND?: unknown } },
       ];
-      expect(countArgs.where.requesterId).toBe('user-1');
+      expect(countArgs.where.AND).toEqual([
+        { OR: [{ requesterId: 'user-1' }, { assigneeId: 'user-1' }] },
+      ]);
     });
 
-    it('leaves staff unfiltered by requester', async () => {
+    // The assertion that carries the new rule: an agent used to reach this
+    // branch with an empty scope and list the whole company.
+    it('confines an agent to the tickets they are part of', async () => {
       await inTenant(() => tickets.findAll(query(), agent));
+
+      const [countArgs] = prisma.ticket.count.mock.calls[0] as [
+        { where: { AND?: unknown } },
+      ];
+      expect(countArgs.where.AND).toEqual([
+        { OR: [{ requesterId: 'user-2' }, { assigneeId: 'user-2' }] },
+      ]);
+    });
+
+    it('leaves an admin unscoped', async () => {
+      await inTenant(() => tickets.findAll(query(), admin));
 
       const [countArgs] = prisma.ticket.count.mock.calls[0] as [
         { where: Record<string, unknown> },
       ];
+      expect(countArgs.where).not.toHaveProperty('AND');
       expect(countArgs.where).not.toHaveProperty('requesterId');
     });
 
-    // The ordering that makes the visibility rule hold: the scope is spread
-    // last, so a requester asking about somebody else overwrites nothing.
-    it('overrides a requesterId a requester tried to pass', async () => {
+    // The scope no longer overwrites the caller's key, it intersects with it:
+    // the filter is honoured and the scope leaves it matching nothing.
+    it('intersects a requesterId a requester passed rather than overwriting it', async () => {
       await inTenant(() =>
         tickets.findAll(query({ requesterId: 'someone-else' }), requester),
       );
 
       const [countArgs] = prisma.ticket.count.mock.calls[0] as [
-        { where: { requesterId?: string } },
+        { where: { requesterId?: string; AND?: unknown } },
       ];
-      expect(countArgs.where.requesterId).toBe('user-1');
+      expect(countArgs.where.requesterId).toBe('someone-else');
+      expect(countArgs.where.AND).toEqual([
+        { OR: [{ requesterId: 'user-1' }, { assigneeId: 'user-1' }] },
+      ]);
     });
 
-    it('honours a requesterId when staff asks', async () => {
+    it('honours a requesterId when an admin asks', async () => {
       await inTenant(() =>
-        tickets.findAll(query({ requesterId: 'someone-else' }), agent),
+        tickets.findAll(query({ requesterId: 'someone-else' }), admin),
       );
 
       const [countArgs] = prisma.ticket.count.mock.calls[0] as [
         { where: { requesterId?: string } },
       ];
       expect(countArgs.where.requesterId).toBe('someone-else');
+    });
+
+    // `search` writes the top-level `OR`. A scope spread into the same object
+    // would replace it and *widen* the page — the one mistake this shape of
+    // `visibleTo()` exists to make impossible.
+    it('never lets the scope replace the search filter', async () => {
+      await inTenant(() =>
+        tickets.findAll(query({ search: 'printer' }), requester),
+      );
+
+      const [countArgs] = prisma.ticket.count.mock.calls[0] as [
+        { where: { OR?: unknown[]; AND?: unknown } },
+      ];
+      expect(countArgs.where.OR).toEqual([
+        { title: { contains: 'printer', mode: 'insensitive' } },
+        { description: { contains: 'printer', mode: 'insensitive' } },
+      ]);
+      expect(countArgs.where.AND).toEqual([
+        { OR: [{ requesterId: 'user-1' }, { assigneeId: 'user-1' }] },
+      ]);
     });
 
     it('refuses unassigned and assigneeId together', async () => {
@@ -378,6 +424,9 @@ describe('TicketsService', () => {
     });
   });
 
+  // The actor is an ADMIN throughout: the route is `@Roles(ADMIN)` now, so an
+  // agent reaching this service is a caller no route can produce. The 403
+  // itself is a guard fact and lives in the e2e tier.
   describe('assign', () => {
     it('accepts an agent', async () => {
       prisma.user.findFirst.mockResolvedValue(
@@ -385,7 +434,7 @@ describe('TicketsService', () => {
       );
 
       await inTenant(() =>
-        tickets.assign('ticket-1', { version: 1, assigneeId: 'user-2' }, agent),
+        tickets.assign('ticket-1', { version: 1, assigneeId: 'user-2' }, admin),
       );
 
       const [args] = prisma.ticket.updateMany.mock.calls[0] as [
@@ -396,7 +445,7 @@ describe('TicketsService', () => {
 
     it('unassigns on an explicit null without looking anybody up', async () => {
       await inTenant(() =>
-        tickets.assign('ticket-1', { version: 1, assigneeId: null }, agent),
+        tickets.assign('ticket-1', { version: 1, assigneeId: null }, admin),
       );
 
       expect(prisma.user.findFirst).not.toHaveBeenCalled();
@@ -416,7 +465,7 @@ describe('TicketsService', () => {
           tickets.assign(
             'ticket-1',
             { version: 1, assigneeId: 'user-3' },
-            agent,
+            admin,
           ),
         ),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -430,7 +479,7 @@ describe('TicketsService', () => {
           tickets.assign(
             'ticket-1',
             { version: 1, assigneeId: 'user-9' },
-            agent,
+            admin,
           ),
         ),
       ).rejects.toBeInstanceOf(NotFoundException);

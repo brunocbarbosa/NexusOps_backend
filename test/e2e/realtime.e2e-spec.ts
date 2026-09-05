@@ -246,11 +246,18 @@ describe('Realtime (e2e)', () => {
         connect(requesterA.accessToken),
       ]);
 
-      const ticket = bodyOf<TicketBody>(
+      const opened = bodyOf<TicketBody>(
         await as(requesterA)
           .post('/tickets')
           .send({ title: 'with a note' })
           .expect(201),
+      );
+      // The agent has to be working the ticket before it can write its note.
+      const ticket = bodyOf<TicketBody>(
+        await as(adminA)
+          .patch(`/tickets/${opened.id}/assignee`)
+          .send({ version: opened.version, assigneeId: agentA.user.id })
+          .expect(200),
       );
 
       const heard = Promise.all([
@@ -273,11 +280,17 @@ describe('Realtime (e2e)', () => {
 
     it('carries the action of a status change', async () => {
       const staff = await connect(agentA.accessToken);
-      const ticket = bodyOf<TicketBody>(
+      const opened = bodyOf<TicketBody>(
         await as(requesterA)
           .post('/tickets')
           .send({ title: 'status watch' })
           .expect(201),
+      );
+      const ticket = bodyOf<TicketBody>(
+        await as(adminA)
+          .patch(`/tickets/${opened.id}/assignee`)
+          .send({ version: opened.version, assigneeId: agentA.user.id })
+          .expect(200),
       );
 
       const heard = collect<TicketMessage>(staff, 'ticket.changed');

@@ -145,8 +145,10 @@ describe('Audit (e2e)', () => {
   it('builds a timeline nobody asked it to build', async () => {
     const ticket = await open(requesterA, 'the whole story');
 
+    // The admin hands it over: assignment is an ADMIN route, and it is also
+    // what lets the agent do anything at all with this ticket below.
     const assigned = bodyOf<TicketBody>(
-      await as(agentA)
+      await as(adminA)
         .patch(`/tickets/${ticket.id}/assignee`)
         .send({ version: ticket.version, assigneeId: agentA.user.id })
         .expect(200),
@@ -173,17 +175,25 @@ describe('Audit (e2e)', () => {
   });
 
   it('hides the internal note from the requester, count included', async () => {
-    const ticket = await open(requesterA, 'with a note');
+    const opened = await open(requesterA, 'with a note');
+    const ticket = bodyOf<TicketBody>(
+      await as(adminA)
+        .patch(`/tickets/${opened.id}/assignee`)
+        .send({ version: opened.version, assigneeId: agentA.user.id })
+        .expect(200),
+    );
     await as(agentA)
       .post(`/tickets/${ticket.id}/comments`)
       .send({ body: 'escalating', isInternal: true })
       .expect(201);
 
-    const staffView = await timeline(agentA, ticket.id, 2);
-    const customerView = await timeline(requesterA, ticket.id, 1);
+    const staffView = await timeline(agentA, ticket.id, 3);
+    const customerView = await timeline(requesterA, ticket.id, 2);
 
-    expect(staffView.meta.total).toBe(2);
-    expect(customerView.meta.total).toBe(1);
+    // created + assigned + internal_note_added, and the customer sees the
+    // first two: the difference is the note, which is the whole assertion.
+    expect(staffView.meta.total).toBe(3);
+    expect(customerView.meta.total).toBe(2);
     expect(
       customerView.data.some((e) => e.action === 'internal_note_added'),
     ).toBe(false);
@@ -193,6 +203,9 @@ describe('Audit (e2e)', () => {
     const ticket = await open(requesterA, 'company A only');
 
     await as(requesterB).get(`/tickets/${ticket.id}/timeline`).expect(404);
+    // The same 404 for a colleague nobody assigned it to as for a stranger in
+    // another company — which is the rule at its sharpest.
+    await as(agentA).get(`/tickets/${ticket.id}/timeline`).expect(404);
   });
 
   describe('the company feed', () => {
@@ -204,7 +217,9 @@ describe('Audit (e2e)', () => {
 
     it('spans tickets and filters by action', async () => {
       const ticket = await open(requesterA, 'in the feed');
-      await timeline(agentA, ticket.id, 1);
+      // Waited for as the admin: nobody has been assigned this ticket, so the
+      // agent cannot read its timeline to wait on it.
+      await timeline(adminA, ticket.id, 1);
 
       const page = bodyOf<PageBody>(
         await as(adminA).get('/audit?action=created&perPage=100').expect(200),

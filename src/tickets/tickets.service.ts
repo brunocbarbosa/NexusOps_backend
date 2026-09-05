@@ -34,7 +34,7 @@ import {
   toTicketResponse,
 } from './ticket-response';
 import { canTransition } from './ticket-transitions';
-import { seesEveryTicket } from './ticket-visibility';
+import { seesEveryTicket, ticketsInvolving } from './ticket-visibility';
 
 /** What a mutation reports to the trail, built after the write has committed. */
 type AuditChange = {
@@ -58,10 +58,12 @@ export type PaginatedTickets = {
  * `where` and stamps it into every `data`. Every cross-tenant 404 in the e2e
  * suite is produced by code that is not in this file.
  *
- * **Visibility is applied last.** `visibleTo()` is spread after the caller's
- * own filters so that a `REQUESTER` passing `?requesterId=<someone else>` has
- * it overwritten rather than honoured — the same ordering trick the extension
- * uses for `tenantId`.
+ * **Visibility is intersected, not applied last.** `visibleTo()` contributes an
+ * `AND` rather than overwriting a key of the caller's, because the scope is an
+ * `OR` over two columns and there is no single key left to overwrite. A
+ * `REQUESTER` passing `?requesterId=<someone else>` therefore gets an empty
+ * page rather than their own tickets — the answer is honest instead of merely
+ * safe, and narrowing is the only thing a filter can do.
  *
  * **Every mutation goes through `mutate()`.** It is the one place the version
  * check lives, and a second copy of it would be a second place for a
@@ -166,7 +168,10 @@ export class TicketsService {
             ],
           }
         : {}),
-      // Last, so it wins over anything the caller asked for.
+      // Last, and under `AND`: it intersects with what the caller asked for
+      // rather than overwriting it, so a filter can only ever narrow the
+      // answer. Spreading it here would replace the `OR` that `search` writes
+      // four lines up.
       ...this.visibleTo(requester),
     };
 
@@ -327,9 +332,13 @@ export class TicketsService {
    * would be a second place for the visibility rule to drift.
    *
    * Both ways of failing produce the same 404. Another tenant's id is filtered
-   * out by the extension; another requester's ticket is filtered out by
-   * `visibleTo()`. A 403 in either case would confirm that the id exists,
-   * which is a fact about somebody else's data.
+   * out by the extension; a ticket the caller neither opened nor is working is
+   * filtered out by `visibleTo()`. A 403 in either case would confirm that the
+   * id exists, which is a fact about somebody else's data.
+   *
+   * This is also where the new visibility rule reaches everything else without
+   * a line of its own: comments, the timeline, the report export and all three
+   * mutations resolve their ticket through here.
    */
   async requireTicket(
     id: string,
@@ -450,11 +459,27 @@ export class TicketsService {
   /**
    * What the caller is allowed to see, as a `where` fragment.
    *
-   * An empty object for staff, so it composes with any other filter without a
-   * branch at the call site.
+   * An empty object for an `ADMIN`, so it composes with any other filter
+   * without a branch at the call site.
+   *
+   * For everybody else it goes under `AND`, and never as a spread of the
+   * scope's own keys. That is the part that changed with the rule. The old
+   * scope was one column, so writing `requesterId` last physically overwrote
+   * whatever the caller had asked for. An `OR` cannot overwrite a column, and
+   * spread last it would do something worse: silently replace the `OR` that
+   * `search` writes in `findAll`, widening the page instead of narrowing it.
+   * `AND` is a key no caller filter uses, so the scope can only ever remove
+   * rows.
+   *
+   * The consequence a client sees is deliberate: a filter is now intersected
+   * with the scope rather than losing to it, so `?requesterId=<somebody else>`
+   * from a requester answers an empty page instead of quietly answering a
+   * different question.
    */
   private visibleTo(requester: AuthenticatedUser): Prisma.TicketWhereInput {
-    return seesEveryTicket(requester.role) ? {} : { requesterId: requester.id };
+    return seesEveryTicket(requester.role)
+      ? {}
+      : { AND: [ticketsInvolving(requester.id)] };
   }
 
   /**
