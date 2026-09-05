@@ -29,6 +29,7 @@ Other documents, by purpose:
 | `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec          |
 | `documents/MAIN.md`                          | you need the product scope the backend serves                   |
 | `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime        |
+| `documents/visibilidade/`                    | working on who sees which ticket, or on assignment              |
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
 | `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
 | `documents/important/`                       | the deep references below — kept together so they stay findable |
