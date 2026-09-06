@@ -23,7 +23,7 @@ import { tenantScoped } from '../../src/tenancy/tenant-scoped';
  * tenant-agnostic model, so it is written under `runWithoutTenant()`, while the
  * user is written under `runWithTenant(tenant.id)`.
  *
- * That rests on two properties of Prisma 7.9.1 that are worth measuring rather
+ * That rests on two properties of Prisma 7.10.0 that are worth measuring rather
  * than assuming — extensions apply to the interactive transaction client, and
  * AsyncLocalStorage survives the awaits inside the callback. Both are pinned
  * here, so a Prisma upgrade that breaks either fails loudly instead of writing

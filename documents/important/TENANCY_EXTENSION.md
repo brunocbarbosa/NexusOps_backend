@@ -6,7 +6,7 @@ The reference for `src/tenancy/`, in two parts that serve different readers.
 you add a model or a module. Its reader is a developer writing a feature on top of this layer, and
 nothing in it requires reading the extension's source.
 
-**Part II is the measured behaviour**: what Prisma 7.9.1 was measured to do in this repository, and
+**Part II is the measured behaviour**: what Prisma 7.10.0 was measured to do in this repository, and
 which of those facts the design depends on. Read it before editing `src/tenancy/tenant-extension.ts`
 or `src/tenancy/tenant-context.ts`, and re-check it after a Prisma upgrade —
 `test/integration/tenant-isolation.int-spec.ts` is what will tell you when one of them stops being
@@ -177,7 +177,7 @@ surface as 500s — which is the honest status for "the server has a bug".
 
 ## Part II — measured behaviour
 
-Everything below was **measured against Prisma 7.9.1 in this repository**, not taken from
+Everything below was **measured against Prisma 7.10.0 in this repository**, not taken from
 documentation. The design of the extension depends on all of it, so a Prisma upgrade means
 re-checking these — `test/integration/tenant-isolation.int-spec.ts` is what will tell you if one
 of them stopped being true.

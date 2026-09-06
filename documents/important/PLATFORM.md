@@ -427,7 +427,7 @@ domain that left a tenant behind would leave exactly that unreachable company.
 
 This is `AuthService.register` moved rather than rewritten, and the delicate part came with it: the
 tenant scope changes halfway through a single transaction, because `Tenant` is tenant-agnostic and
-`User` is not. Two Prisma 7.9.1 properties make it work, and both are pinned in
+`User` is not. Two Prisma 7.10.0 properties make it work, and both are pinned in
 `test/integration/platform-companies.int-spec.ts`: extensions apply to the interactive transaction
 client `tx`, and `AsyncLocalStorage` survives the awaits inside the callback.
 

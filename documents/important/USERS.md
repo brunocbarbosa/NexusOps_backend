@@ -475,7 +475,7 @@ Real today, and a client will hit them:
 
 ## Part II — measured behaviour
 
-Everything below was **measured in this repository**, against Prisma 7.9.1, bcrypt 6.0.0,
+Everything below was **measured in this repository**, against Prisma 7.10.0, bcrypt 6.0.0,
 class-transformer 0.5.1 and `@nestjs/config` 4. These are not recommendations taken from
 documentation: they are things the code depends on being true, each with the test that will tell
 you when one of them stops being so.
@@ -511,7 +511,7 @@ under `runWithTenant(tenant.id)`, **inside the same transaction** — splitting 
 company existing with nobody able to log into it. (This was `AuthService.register()` until company
 creation became the platform operator's job; the transaction moved unchanged.)
 
-Two properties of Prisma 7.9.1 hold that together, and both were measured:
+Two properties of Prisma 7.10.0 hold that together, and both were measured:
 
 - **The extension applies to the transactional client.** The callback's `tx` stamps `tenantId` and
   refuses a cross-tenant write exactly like the client outside it. A transaction is not a way around

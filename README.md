@@ -116,7 +116,7 @@ extension at all.
 > before any query runs. The integration suite has a dedicated `background worker` block asserting
 > exactly this.
 
-The extension's measured behaviour against Prisma 7.9.1 — five findings the design depends on — is
+The extension's measured behaviour against Prisma 7.10.0 — five findings the design depends on — is
 written up in [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md).
 
 ### 2. Optimistic concurrency control
@@ -369,7 +369,7 @@ The code and its comments are in English, and so is everything under `documents/
 | Document                                                                                       | What it covers                                                      |
 | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | [`documents/MAIN.md`](documents/MAIN.md)                                                       | The authoritative specification — the "why" behind each technology  |
-| [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md)         | Measured Prisma 7.9.1 behaviour the tenant extension depends on     |
+| [`documents/important/TENANCY_EXTENSION.md`](documents/important/TENANCY_EXTENSION.md)         | Measured Prisma 7.10.0 behaviour the tenant extension depends on    |
 | [`documents/important/HELPDESK.md`](documents/important/HELPDESK.md)                           | The helpdesk API contract, and the behaviour measured behind it     |
 | [`documents/helpdesk/GUIA_FRONTEND_HELPDESK.md`](documents/helpdesk/GUIA_FRONTEND_HELPDESK.md) | What a Next.js client has to decide because of this API             |
 | [`documents/important/RLS_NOTES.md`](documents/important/RLS_NOTES.md)                         | Row-Level Security research, including two traps measured firsthand |
