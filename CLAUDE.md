@@ -409,10 +409,22 @@ database and issues both a `$queryRaw` and a model query — the model query is 
 the compiler. Re-check the prune when upgrading Prisma; the smoke test is what turns that from a
 hope into a check.
 
-`package.json` pins an npm `overrides` entry forcing `deepmerge-ts` to `^8.0.1`. This resolves a
-high-severity advisory reachable through the Prisma CLI; removing it reintroduces the
-vulnerability, and the alternative was downgrading Prisma. Re-check whether it is still needed
-when upgrading Prisma.
+**`package.json` pins two npm `overrides`, and both exist for the same reason: the Prisma CLI drags
+a driver stack this project never uses into the tree, and `npm audit` reads the lockfile.**
+`deepmerge-ts` is forced to `^8.0.1` and `mysql2` to `^3.24.3`; removing either reintroduces a
+high-severity advisory, and in both cases the only alternative npm offers is `--force`, which
+"fixes" them by downgrading Prisma to v6. Re-check whether either is still needed when upgrading
+Prisma — `prisma@7.10.0` still pins `mysql2` at exactly `3.15.3`, which is why the override and not
+a bump is the answer today.
+
+Forcing `mysql2` is safe here in a way worth stating: nothing in this project speaks MySQL. The
+package is in the tree only because `@prisma/client@7` declares `prisma` as an **optional peer**, so
+the CLI survives `--omit=dev` and `--omit=peer` and brings every driver with it. Measured inside the
+built image: `mysql2` and `fast-uri` are present but **orphaned** — npm hoists them to the top level,
+so the Dockerfile's `rm -rf node_modules/prisma` removes what required them and not them. They are
+unreachable at runtime; `qs`, which arrives through `express`, is the only one of the three that a
+request can actually touch. That is why the prune is not a substitute for the overrides, and the
+overrides are not a substitute for the prune.
 
 Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
 (`passport-jwt`) and `bcrypt` for password hashing. Access and refresh tokens are signed with
