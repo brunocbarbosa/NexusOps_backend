@@ -96,6 +96,9 @@ export class CommentsService {
       tenantId: author.tenantId,
       actorId: author.id,
       requesterId: ticket.requesterId,
+      // A comment changes no assignment, so there is one side to name and it
+      // is already in hand: `requireTicket()` returned the row.
+      assigneeIds: ticket.assigneeId === null ? [] : [ticket.assigneeId],
       entityType: AUDIT_ENTITIES.Ticket,
       entityId: ticket.id,
       action: comment.isInternal

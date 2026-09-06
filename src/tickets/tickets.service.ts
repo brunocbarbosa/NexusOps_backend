@@ -36,6 +36,19 @@ import {
 import { canTransition } from './ticket-transitions';
 import { seesEveryTicket, ticketsInvolving } from './ticket-visibility';
 
+/**
+ * Who a change concerns, besides the company's admins.
+ *
+ * `assignees` takes both sides of the mutation — before and after — because
+ * only a reassignment has two, and asking every caller to work out which case
+ * it is in would be a branch per action. `emit()` drops the nulls and the
+ * duplicate.
+ */
+type Audience = {
+  requesterId: string;
+  assignees: readonly (string | null)[];
+};
+
 /** What a mutation reports to the trail, built after the write has committed. */
 type AuditChange = {
   action: AuditAction;
@@ -121,17 +134,24 @@ export class TicketsService {
     });
 
     const response = toTicketResponse(ticket);
-    this.emit(requester, response.id, response.requester.id, {
-      action: AUDIT_ACTIONS.Created,
-      oldValues: {},
-      newValues: {
-        number: response.number,
-        title: response.title,
-        status: response.status,
-        priority: response.priority,
-        category: response.category,
+    // Always unassigned: `POST /tickets` takes no assigneeId, so a new ticket
+    // reaches nobody's queue until an admin puts it there.
+    this.emit(
+      requester,
+      response.id,
+      { requesterId: response.requester.id, assignees: [] },
+      {
+        action: AUDIT_ACTIONS.Created,
+        oldValues: {},
+        newValues: {
+          number: response.number,
+          title: response.title,
+          status: response.status,
+          priority: response.priority,
+          category: response.category,
+        },
       },
-    });
+    );
 
     return response;
   }
@@ -420,7 +440,19 @@ export class TicketsService {
     // After the transaction, never inside it. An event emitted from within the
     // callback would announce a change that a later statement could still roll
     // back, and the trail would record something that never happened.
-    this.emit(requester, after.id, before.requesterId, audit(before, after));
+    // Both sides of the assignee, every time. `mutate()` already holds `before`
+    // and `after`, so the reassignment — the one change that concerns two
+    // agents, the one it reached and the one it left — costs no branch of its
+    // own, and no future mutation can forget it.
+    this.emit(
+      requester,
+      after.id,
+      {
+        requesterId: before.requesterId,
+        assignees: [before.assigneeId, after.assignee?.id ?? null],
+      },
+      audit(before, after),
+    );
 
     return after;
   }
@@ -428,21 +460,27 @@ export class TicketsService {
   /**
    * The single place this service talks to the outside world about a change.
    *
-   * It emits and does not await: listeners are the audit trail and, later, the
+   * It emits and does not await: listeners are the audit trail and the
    * notification gateway, and neither is allowed to make a request slower or to
    * fail it. `tenantId` rides in the payload because a listener has no promise
    * of inheriting the request's scope — see `audit.events.ts`.
+   *
+   * The audience is normalised here rather than at the two call sites: the
+   * common case names one assignee twice, the reassignment is the only one with
+   * two, and neither caller should have to remember to drop the nulls or the
+   * duplicate.
    */
   private emit(
     actor: AuthenticatedUser,
     ticketId: string,
-    requesterId: string,
+    audience: Audience,
     change: AuditChange,
   ): void {
     const event: TicketEvent = {
       tenantId: actor.tenantId,
       actorId: actor.id,
-      requesterId,
+      requesterId: audience.requesterId,
+      assigneeIds: [...new Set(audience.assignees.filter((id) => id !== null))],
       entityType: AUDIT_ENTITIES.Ticket,
       entityId: ticketId,
       action: change.action,

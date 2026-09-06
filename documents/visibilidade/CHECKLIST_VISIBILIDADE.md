@@ -30,8 +30,8 @@ aqui → commit → parar e perguntar antes da próxima fase.
 | ------------------------------ | ------------ | --------- |
 | 0 — Branch e documentos        | ✅ concluída | `a389b2d` |
 | 1 — O escopo                   | ✅ concluída | `77ff34b` |
-| 2 — Os guards                  | ✅ concluída | —         |
-| 3 — Eventos e WebSocket        | ⏳ pendente  | —         |
+| 2 — Os guards                  | ✅ concluída | `40b2b59` |
+| 3 — Eventos e WebSocket        | ✅ concluída | —         |
 | 4 — Documentação de referência | ⏳ pendente  | —         |
 | 5 — O plano de frontend        | ⏳ pendente  | —         |
 
@@ -157,7 +157,7 @@ O coração da mudança, e a fase de maior raio: quase todo o custo de teste est
 
 - [x] `POST /tickets` como `ADMIN_MASTER` respondia **500** de fato — confirmado rodando o teste
       novo contra o código antigo, que falhou com `expected 403 "Forbidden", got 500 "Internal
-  Server Error"`. O agente respondia **201**
+Server Error"`. O agente respondia **201**
 
 ---
 
@@ -166,36 +166,45 @@ O coração da mudança, e a fase de maior raio: quase todo o custo de teste est
 Os tipos primeiro: o campo obrigatório quebra o build em todo emissor, e é assim que o compilador
 nomeia os três lugares.
 
-- [ ] `TicketEvent` ganha `assigneeIds: string[]`, obrigatório, logo depois de `requesterId`
-- [ ] `TicketsService.emit()` recebe um `Audience` e normaliza num lugar só (filtra nulos, deduplica)
-- [ ] `mutate()` passa `before.assigneeId` e o assignee de depois — a reatribuição entrega as duas
+- [x] `TicketEvent` ganha `assigneeIds: string[]`, obrigatório, logo depois de `requesterId`
+- [x] `TicketsService.emit()` recebe um `Audience` e normaliza num lugar só (filtra nulos, deduplica)
+- [x] `mutate()` passa `before.assigneeId` e o assignee de depois — a reatribuição entrega as duas
       pessoas sem ramo por ação
-- [ ] `create()` emite com lista vazia
-- [ ] `CommentsService` preenche com o `ticket.assigneeId` que já tem em mãos
-- [ ] `staffRoom()` → `adminRoom()`, string `tenant:<id>:admins`
-- [ ] `joinsStaffRoom()` → `joinsAdminRoom()`, corpo `role === ADMIN`
-- [ ] `handleConnection` e o docblock que fala em "staff room"
-- [ ] Fan-out reescrito: uma lista de salas e **um** `.to([...]).emit()`, que deduplica quem está em
+- [x] `create()` emite com lista vazia
+- [x] `CommentsService` preenche com o `ticket.assigneeId` que já tem em mãos
+- [x] `staffRoom()` → `adminRoom()`, string `tenant:<id>:admins`
+- [x] `joinsStaffRoom()` → `joinsAdminRoom()`, corpo `role === ADMIN`
+- [x] `handleConnection` e o docblock que fala em "staff room"
+- [x] Fan-out reescrito: uma lista de salas e **um** `.to([...]).emit()`, que deduplica quem está em
       duas salas — duas chamadas separadas não deduplicam
-- [ ] O literal `'internal_note_added'` some em favor de `STAFF_ONLY_ACTIONS`, a mesma constante da
+- [x] O literal `'internal_note_added'` some em favor de `STAFF_ONLY_ACTIONS`, a mesma constante da
       timeline
-- [ ] `src/comments/internal-notes.ts` — só o docblock: o corpo deixou de ser idêntico ao de
+- [x] `src/comments/internal-notes.ts` — só o docblock: o corpo deixou de ser idêntico ao de
       `seesEveryTicket()`, que é exatamente o dia que aquele comentário antecipava
 
 ### Testes
 
-- [ ] `src/realtime/rooms.spec.ts` (novo)
-- [ ] `src/realtime/notifications.gateway.spec.ts` (novo) — a sala de admin sempre na lista, cada id
+- [x] `src/realtime/rooms.spec.ts` (novo)
+- [x] `src/realtime/notifications.gateway.spec.ts` (novo) — a sala de admin sempre na lista, cada id
       de `assigneeIds` também, o requester exceto em nota interna, e nenhuma sala órfã
-- [ ] `tickets.service.spec.ts` — `assigneeIds` com dois nomes na reatribuição, vazio, deduplicado
-- [ ] `test/e2e/realtime.e2e-spec.ts` — `:211` conecta um `ADMIN`; `:243` e `:274` com atribuição
-- [ ] Novo e o que mais importa: **o agente não atribuído não ouve nada** — a asserção negativa
-- [ ] Novo: o agente atribuído passa a ouvir, e o agente que perdeu o chamado ouve o `assigned` que
+- [x] `tickets.service.spec.ts` — `assigneeIds` com dois nomes na reatribuição, vazio, deduplicado
+- [x] `test/e2e/realtime.e2e-spec.ts` — `:211` conecta um `ADMIN`; `:243` e `:274` com atribuição
+- [x] Novo e o que mais importa: **o agente não atribuído não ouve nada** — a asserção negativa
+- [x] Novo: o agente atribuído passa a ouvir, e o agente que perdeu o chamado ouve o `assigned` que
       o tirou
 
 ### Verificação
 
-- [ ] `npm run test:all`, `npm run typecheck`, eslint
+- [x] `npm run test:all` verde — 232 unit, 95 integração, 163 e2e
+- [x] `npm run typecheck` e eslint sem `--fix`
+
+### Não estava no plano
+
+- [x] `src/realtime/` não tinha **nenhum** unitário: o gateway era coberto só pelo e2e. Agora tem
+      dois arquivos, e é onde a fronteira de acesso do agente fica fixada mais barato
+- [x] O `emit` único sobre a lista de salas corrigiu de passagem uma duplicata que já existia: quem
+      era admin **e** requester do mesmo chamado recebia o evento duas vezes, porque a de-duplicação
+      do socket.io vale dentro de uma chamada e não entre duas
 
 ---
 

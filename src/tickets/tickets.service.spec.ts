@@ -514,6 +514,60 @@ describe('TicketsService', () => {
       expect(event.actorId).toBe('user-1');
     });
 
+    // The gateway routes an agent's notifications on this list, so an emit
+    // site that got it wrong would leave the person actually working the
+    // ticket with a screen that never moves — and nothing would fail.
+    it('carries no assignee for a ticket nobody is working', async () => {
+      await inTenant(() => tickets.create({ title: 'x' }, requester));
+
+      const [, event] = events.emit.mock.calls[0] as [
+        string,
+        { assigneeIds: string[] },
+      ];
+      expect(event.assigneeIds).toEqual([]);
+    });
+
+    it('carries both sides of a reassignment', async () => {
+      prisma.ticket.findFirst.mockResolvedValue(row({ assigneeId: 'user-2' }));
+      prisma.user.findFirst.mockResolvedValue(
+        user({ id: 'user-3', role: UserRole.AGENT }),
+      );
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue({
+        ...row({ version: 2, assigneeId: 'user-3' }),
+        assignee: user({ id: 'user-3', role: UserRole.AGENT }),
+      });
+
+      await inTenant(() =>
+        tickets.assign('ticket-1', { version: 1, assigneeId: 'user-3' }, admin),
+      );
+
+      const [, event] = events.emit.mock.calls[0] as [
+        string,
+        { assigneeIds: string[] },
+      ];
+      // The one it left and the one it reached: the first needs the event so
+      // its queue can drop the row.
+      expect(event.assigneeIds).toEqual(['user-2', 'user-3']);
+    });
+
+    it('names the same assignee once', async () => {
+      prisma.ticket.findFirst.mockResolvedValue(row({ assigneeId: 'user-2' }));
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue({
+        ...row({ version: 2, assigneeId: 'user-2' }),
+        assignee: user({ id: 'user-2', role: UserRole.AGENT }),
+      });
+
+      await inTenant(() =>
+        tickets.update('ticket-1', { version: 1, title: 'edited' }, admin),
+      );
+
+      const [, event] = events.emit.mock.calls[0] as [
+        string,
+        { assigneeIds: string[] },
+      ];
+      expect(event.assigneeIds).toEqual(['user-2']);
+    });
+
     it('names a status change distinctly from an edit', async () => {
       // The re-read after the write is what the event's newValues come from,
       // so the mock has to move too.
