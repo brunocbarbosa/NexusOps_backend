@@ -100,7 +100,8 @@
     "typescript-eslint": "^8.68.0"
   },
   "overrides": {
-    "deepmerge-ts": "^8.0.1"
+    "deepmerge-ts": "^8.0.1",
+    "mysql2": "^3.24.3"
   },
   "lint-staged": {
     "*.ts": [
