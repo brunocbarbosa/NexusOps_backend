@@ -29,6 +29,7 @@ Other documents, by purpose:
 | `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec          |
 | `documents/MAIN.md`                          | you need the product scope the backend serves                   |
 | `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime        |
+| `documents/visibilidade/`                    | working on who sees which ticket, or on assignment              |
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
 | `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
 | `documents/important/`                       | the deep references below — kept together so they stay findable |
@@ -318,6 +319,18 @@ string — is in **`documents/important/USERS.md`**, Part II. Read it before edi
 tables, every endpoint with its real request and response payloads, and the full error
 catalogue — and is what a client integrates against without reading the source.
 
+**Who sees which ticket.** An `ADMIN` sees the company's whole queue; everybody else sees
+`requesterId = me OR assigneeId = me`. Assignment is therefore a grant of access rather than a step
+in a workflow, which is why `PATCH /tickets/:id/assignee` is `@Roles(ADMIN)` and why `POST /tickets`
+is `@Roles(ADMIN, REQUESTER)` — an `AGENT` that could open a ticket could see its way to one.
+`seesEveryTicket()` and `ticketsInvolving()` in `src/tickets/ticket-visibility.ts` are the whole
+rule, and `TicketsService.visibleTo()` is its only caller. **The scope goes under `AND`, never
+spread**: it is an `OR` over two columns, so there is no single key left to overwrite, and spreading
+it would silently replace the `OR` that `search` writes and widen the page. One consequence is
+visible to clients — a filter is intersected rather than overridden, so `?requesterId=<somebody
+else>` answers an empty page. `load()` needs no change under any of this, which is why comments, the
+timeline, the export and the three mutations inherit the rule for free.
+
 **Optimistic concurrency control.** Simultaneous ticket updates are a real race in a helpdesk. A
 version column guards mutable rows; a conflicting update must fail loudly rather than silently
 overwrite. Any new mutable aggregate needs the same guard.
@@ -329,7 +342,7 @@ interactive transaction so that 404 and 409 stay distinguishable.
 
 Why that is forced rather than chosen, how per-tenant ticket numbers are handed out without a race,
 whether the tenant context survives an `emit`, why the audit write lands outside the mutation's
-transaction, and why the WebSocket staff room is what keeps a requester out of another ticket's
+transaction, and why the WebSocket admin room is what keeps a requester out of another ticket's
 events are in **`documents/important/HELPDESK.md`**, Part II. Part I is the API contract for the
 whole slice — tickets, comments, the trail, the export and the socket — with payloads captured from
 the running application; hand it to whoever writes the frontend, together with
@@ -362,11 +375,14 @@ background job finishes. Redis therefore serves double duty: queue backend and p
 
 `src/realtime/` subscribes to the same event stream the audit trail does, so no domain service knows
 it exists. **The visibility rule has to be re-established at that boundary**: a socket joins
-`user:<id>` always and `tenant:<id>:staff` only if it is an `ADMIN` or an `AGENT`, because
-broadcasting to a plain per-tenant room would hand a `REQUESTER` every ticket in the company with no
-controller involved to refuse it — and no HTTP test would fail. The handshake re-reads the role from
-the database for the same reason `JwtStrategy` does, and more so: a socket outlives an access token
-by hours.
+`user:<id>` always and `tenant:<id>:admins` only if it is an `ADMIN`, because broadcasting to a
+plain per-tenant room would hand a `REQUESTER` every ticket in the company with no controller
+involved to refuse it — and no HTTP test would fail. An `AGENT` is not in that room either: it is
+the _ticket_ that entitles it to an event and not the role, so `TicketEvent` carries `assigneeIds`
+and the gateway addresses it personally. The field is required rather than optional for the same
+reason — an emit site that forgot it would leave the person actually working the ticket with a
+screen that never moves, and nothing would fail. The handshake re-reads the role from the database
+for the same reason `JwtStrategy` does, and more so: a socket outlives an access token by hours.
 
 ## Stack notes
 
@@ -393,10 +409,22 @@ database and issues both a `$queryRaw` and a model query — the model query is 
 the compiler. Re-check the prune when upgrading Prisma; the smoke test is what turns that from a
 hope into a check.
 
-`package.json` pins an npm `overrides` entry forcing `deepmerge-ts` to `^8.0.1`. This resolves a
-high-severity advisory reachable through the Prisma CLI; removing it reintroduces the
-vulnerability, and the alternative was downgrading Prisma. Re-check whether it is still needed
-when upgrading Prisma.
+**`package.json` pins two npm `overrides`, and both exist for the same reason: the Prisma CLI drags
+a driver stack this project never uses into the tree, and `npm audit` reads the lockfile.**
+`deepmerge-ts` is forced to `^8.0.1` and `mysql2` to `^3.24.3`; removing either reintroduces a
+high-severity advisory, and in both cases the only alternative npm offers is `--force`, which
+"fixes" them by downgrading Prisma to v6. Re-check whether either is still needed when upgrading
+Prisma — `prisma@7.10.0` still pins `mysql2` at exactly `3.15.3`, which is why the override and not
+a bump is the answer today.
+
+Forcing `mysql2` is safe here in a way worth stating: nothing in this project speaks MySQL. The
+package is in the tree only because `@prisma/client@7` declares `prisma` as an **optional peer**, so
+the CLI survives `--omit=dev` and `--omit=peer` and brings every driver with it. Measured inside the
+built image: `mysql2` and `fast-uri` are present but **orphaned** — npm hoists them to the top level,
+so the Dockerfile's `rm -rf node_modules/prisma` removes what required them and not them. They are
+unreachable at runtime; `qs`, which arrives through `express`, is the only one of the three that a
+request can actually touch. That is why the prune is not a substitute for the overrides, and the
+overrides are not a substitute for the prune.
 
 Auth is JWT-based with the tenant id in the token payload, using `@nestjs/jwt` + Passport
 (`passport-jwt`) and `bcrypt` for password hashing. Access and refresh tokens are signed with

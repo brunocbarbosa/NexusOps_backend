@@ -10,12 +10,15 @@ import type { Server, Socket } from 'socket.io';
 import type { AccessTokenPayload } from '../auth/authenticated-user';
 import { REPORT_EVENTS, REPORT_EVENT_PATTERN } from '../events/report-events';
 import type { ReportEvent } from '../events/report-events';
-import { TICKET_EVENT_PATTERN } from '../events/ticket-events';
+import {
+  STAFF_ONLY_ACTIONS,
+  TICKET_EVENT_PATTERN,
+} from '../events/ticket-events';
 import type { TicketEvent } from '../events/ticket-events';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { runWithTenant } from '../tenancy/tenant-context';
-import { joinsStaffRoom, staffRoom, userRoom } from './rooms';
+import { adminRoom, joinsAdminRoom, userRoom } from './rooms';
 
 /**
  * Pushes what just happened to the people entitled to hear it.
@@ -55,8 +58,8 @@ export class NotificationsGateway implements OnGatewayConnection {
    *
    * **The role comes from the database, not from the token**, for the same
    * reason `JwtStrategy` re-reads it on every request: a socket outlives an
-   * access token's fifteen minutes by hours, so an agent demoted — or
-   * deactivated — after connecting would otherwise sit in the staff room for
+   * access token's fifteen minutes by hours, so an admin demoted — or
+   * deactivated — after connecting would otherwise sit in the admin room for
    * as long as they keep the tab open.
    */
   async handleConnection(client: Socket): Promise<void> {
@@ -84,8 +87,8 @@ export class NotificationsGateway implements OnGatewayConnection {
     }
 
     await client.join(userRoom(user.id));
-    if (joinsStaffRoom(user.role)) {
-      await client.join(staffRoom(user.tenantId));
+    if (joinsAdminRoom(user.role)) {
+      await client.join(adminRoom(user.tenantId));
     }
 
     client.emit('ready', { userId: user.id, role: user.role });
@@ -94,13 +97,22 @@ export class NotificationsGateway implements OnGatewayConnection {
   /**
    * A ticket moved.
    *
-   * Staff hear about every ticket in their company; the requester hears about
-   * their own. socket.io de-duplicates across rooms, so an agent who opened the
-   * ticket themselves still receives it once.
+   * The company's admins hear about every ticket, in one room. An agent is not
+   * in that room any more and is addressed personally, because it is the
+   * *ticket* that entitles it to the event and not the role. On a reassignment
+   * that is two people: the agent it reached, and the agent it left — who needs
+   * the event precisely so its queue can drop the row. That one event describes
+   * a ticket the agent can no longer read over HTTP, and it is the deliberate
+   * exception: it says something is leaving, not something they did not already
+   * know.
    *
-   * The internal note is the one thing held back: it is emitted only to staff,
-   * because the whole point of `internal_note_added` being a separate action is
-   * that the customer never learns the note exists.
+   * One `emit` over a list of rooms rather than one call per room, because
+   * socket.io de-duplicates within a call and not across two: whoever is both
+   * an admin and the requester used to receive this twice.
+   *
+   * The internal note is the one thing held back from the requester, through
+   * the same `STAFF_ONLY_ACTIONS` the timeline filters on — so the socket and
+   * the timeline cannot come to disagree about what a customer may learn.
    */
   @OnEvent(TICKET_EVENT_PATTERN)
   onTicketEvent(event: TicketEvent): void {
@@ -112,13 +124,16 @@ export class NotificationsGateway implements OnGatewayConnection {
       newValues: event.newValues ?? null,
     };
 
-    this.server.to(staffRoom(event.tenantId)).emit('ticket.changed', message);
+    const rooms = [
+      adminRoom(event.tenantId),
+      ...event.assigneeIds.map(userRoom),
+    ];
 
-    if (event.action !== 'internal_note_added') {
-      this.server
-        .to(userRoom(event.requesterId))
-        .emit('ticket.changed', message);
+    if (!STAFF_ONLY_ACTIONS.includes(event.action)) {
+      rooms.push(userRoom(event.requesterId));
     }
+
+    this.server.to(rooms).emit('ticket.changed', message);
   }
 
   /**

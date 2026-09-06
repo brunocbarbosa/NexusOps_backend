@@ -23,15 +23,20 @@ have no request context — are in `CLAUDE.md` under "Architecture".
 Four on `User.role`, and they are **not** hierarchical, not even by convention: the code checks
 membership in a list, never an ordering.
 
-| Role           | Means                                                                             |
-| -------------- | --------------------------------------------------------------------------------- |
-| `ADMIN_MASTER` | the platform operator. Exactly one exists, and it is not part of a tenant's staff |
-| `ADMIN`        | administers the tenant: manages every user                                        |
-| `AGENT`        | works tickets; may list users                                                     |
-| `REQUESTER`    | opens tickets; the default for a new user                                         |
+| Role           | Means                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------- |
+| `ADMIN_MASTER` | the platform operator. Exactly one exists, and it is not part of a tenant's staff      |
+| `ADMIN`        | administers the tenant: manages every user, and is the only role that assigns a ticket |
+| `AGENT`        | works the tickets assigned to it, and opens none; may list users                       |
+| `REQUESTER`    | opens tickets and sees only its own; the default for a new user                        |
 
 `REQUESTER` is the schema default, and deliberately the least privileged: adding a user without
 saying a role cannot accidentally grant more than intended.
+
+**What a role means in the helpdesk is not this table's subject.** The column above says only
+enough to keep the four apart. Who sees which ticket — and why it is assignment rather than the
+role that grants it — is the "Who sees which ticket" section of [`HELPDESK.md`](./HELPDESK.md),
+and a claim about a role's reach belongs there rather than here.
 
 **`ADMIN_MASTER` is not assignable through this API.** No route accepts it — `ASSIGNABLE_ROLES` in
 `src/users/assignable-role.ts` is what `POST /users`, `PATCH /users/:id` and `GET /users?role=`

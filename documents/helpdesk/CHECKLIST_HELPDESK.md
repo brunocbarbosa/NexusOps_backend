@@ -12,6 +12,12 @@ Marcar cada item ao concluir. Cada fase termina com verificação, commit e chec
 **Regra de execução:** implementar → rodar a verificação da fase e mostrar a saída real →
 marcar aqui → commit → parar e perguntar antes da próxima fase.
 
+> **Nota de 2026-09-05.** A visibilidade descrita aqui mudou depois desta fase: um `AGENT` deixou de
+> ver todos os chamados da empresa e passou a ver os atribuídos a ele, atribuir virou rota exclusiva
+> do `ADMIN`, e `POST /tickets` deixou de aceitar um agente. Este arquivo é o registro do que foi
+> executado naquela fase e **não** foi reescrito — o estado corrente está em
+> [`visibilidade/`](../visibilidade/) e em [`important/HELPDESK.md`](../important/HELPDESK.md).
+
 ## Decisões tomadas antes de começar
 
 | Assunto      | Decisão                                                                              |

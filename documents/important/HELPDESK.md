@@ -34,15 +34,27 @@ redefined here.
 Visibility is a property of the slice, not of a guard, and it is the first thing a client has to
 understand: two users of the same company can ask for the same URL and get different answers.
 
-| Role           | Sees                                             | May also                                                 |
-| -------------- | ------------------------------------------------ | -------------------------------------------------------- |
-| `ADMIN_MASTER` | nothing — the operator has no tickets of its own | —                                                        |
-| `ADMIN`        | every ticket in the company                      | change status, assign, read and write internal notes     |
-| `AGENT`        | every ticket in the company                      | change status, assign, read and write internal notes     |
-| `REQUESTER`    | only the tickets it opened                       | comment on its own tickets, edit them while not `CLOSED` |
+| Role           | Sees                                             | May also                                                    |
+| -------------- | ------------------------------------------------ | ----------------------------------------------------------- |
+| `ADMIN_MASTER` | nothing — the operator has no tickets of its own | —                                                           |
+| `ADMIN`        | every ticket in the company                      | open, change status, assign, read and write internal notes  |
+| `AGENT`        | only the tickets assigned to it                  | change status and internal notes **on those**; never assign |
+| `REQUESTER`    | only the tickets it opened                       | open one, comment on its own, edit them while not `CLOSED`  |
+
+Precisely: an `ADMIN` sees everything, and everybody else sees
+`requesterId = me OR assigneeId = me`. A `REQUESTER` can never be an assignee, so for them the
+second arm never matches; an `AGENT` can no longer open a ticket, so for them the first arm only
+matches rows opened before this rule existed.
+
+**Assignment is what grants and revokes sight of a ticket.** That is why it is an `ADMIN` route:
+an agent assigning one to itself would be an agent granting itself visibility, and an agent
+unassigning itself would be one erasing a ticket from the only queue that shows it. It is also why
+a ticket **nobody is assigned to is invisible to every agent** — the unassigned queue belongs to
+the admin, and nothing gets worked until somebody hands it over.
 
 A ticket the caller cannot see answers **404, never 403** — the same rule the rest of the API
-follows, and for the same reason: a 403 would confirm that the id exists somewhere.
+follows, and for the same reason: a 403 would confirm that the id exists somewhere. An agent asking
+for a colleague's ticket therefore gets the same answer as a stranger from another company.
 
 ### The data model
 
@@ -98,17 +110,23 @@ Every route is authenticated — `JwtAuthGuard` is global — and the `Auth` col
 required. "any" means any authenticated user, narrowed per caller by the visibility rule above
 rather than by a guard.
 
-| Method  | Path                    | Auth             | Success | Purpose                                |
-| ------- | ----------------------- | ---------------- | ------- | -------------------------------------- |
-| `POST`  | `/tickets`              | any              | `201`   | open a ticket; requester is the caller |
-| `GET`   | `/tickets`              | any              | `200`   | paginated, filtered list               |
-| `GET`   | `/tickets/:id`          | any              | `200`   | one ticket                             |
-| `PATCH` | `/tickets/:id`          | any              | `200`   | title, description, priority, category |
-| `PATCH` | `/tickets/:id/status`   | `ADMIN`, `AGENT` | `200`   | move through the lifecycle             |
-| `PATCH` | `/tickets/:id/assignee` | `ADMIN`, `AGENT` | `200`   | assign, or unassign with `null`        |
+| Method  | Path                    | Auth                 | Success | Purpose                                |
+| ------- | ----------------------- | -------------------- | ------- | -------------------------------------- |
+| `POST`  | `/tickets`              | `ADMIN`, `REQUESTER` | `201`   | open a ticket; requester is the caller |
+| `GET`   | `/tickets`              | any                  | `200`   | paginated, filtered list               |
+| `GET`   | `/tickets/:id`          | any                  | `200`   | one ticket                             |
+| `PATCH` | `/tickets/:id`          | any                  | `200`   | title, description, priority, category |
+| `PATCH` | `/tickets/:id/status`   | `ADMIN`, `AGENT`     | `200`   | move through the lifecycle             |
+| `PATCH` | `/tickets/:id/assignee` | `ADMIN`              | `200`   | assign, or unassign with `null`        |
 
 **There is no `DELETE`.** `CLOSED` is the terminal state and takes the role a delete would play. A
 ticket is the subject of an audit trail, and deleting it would delete what the trail is about.
+
+**An `AGENT` cannot open a ticket** — `POST /tickets` answers it `403`. The role that _works_ a
+ticket is not the role that _opens_ it, and leaving the route open to an agent would hand it a way
+around the rule above, because the author of a ticket sees it. `ADMIN_MASTER` gets the same 403,
+which is an improvement on the `500` it used to get: the reserved platform tenant has no
+`ticket_counters` row, so the route reached the service and threw.
 
 Query parameters on `GET /tickets`:
 
@@ -120,13 +138,25 @@ Query parameters on `GET /tickets`:
 | `priority`    | —       | one of the four `TicketPriority` values                          |
 | `category`    | —       | one of the five `TicketCategory` values                          |
 | `assigneeId`  | —       | uuid                                                             |
-| `requesterId` | —       | uuid; **ignored for a `REQUESTER`**, who always gets their own   |
+| `requesterId` | —       | uuid; **intersected** with the caller's scope, never overriding  |
 | `unassigned`  | —       | `true` or `false`; a `400` if sent together with `assigneeId`    |
 | `search`      | —       | 1 to 255 characters, case-insensitive over title and description |
 
+**Every filter is intersected with what the caller may see, never overridden by it.** A
+`REQUESTER` sending `?requesterId=<somebody else>` gets an **empty page**, not their own tickets:
+the filter is obeyed and the scope leaves it matching nothing. The same goes for an agent asking
+about a colleague's queue. It narrows and never widens, which is the only thing a filter is allowed
+to do here.
+
+`unassigned=true` is worth stating outright, because a client will otherwise think it is broken:
+for an `ADMIN` it is the company's unassigned queue, and for anybody else it is
+`assigneeId = null AND (requesterId = me OR assigneeId = me)`, whose second arm cannot hold — so
+what comes back is **the tickets they opened that nobody has picked up**. An agent has no unassigned
+queue, by design.
+
 The page envelope is the `{ data, meta }` one already defined in [`USERS.md`](./USERS.md); it is
-not redefined here. `meta.total` respects visibility — a requester's total counts only their own
-tickets, because a count that included invisible rows would announce that they exist.
+not redefined here. `meta.total` respects visibility — an agent's total counts only the tickets
+assigned to it, because a count that included invisible rows would announce that they exist.
 
 ### `TicketResponse`
 
@@ -569,25 +599,31 @@ The token expires long before a tab is closed, so a client has to reconnect with
 refresh. **Set `reconnection: false` if you do not**, or a socket refused for an expired token
 retries forever.
 
-| Event              | Sent to                                                | Payload                                               |
-| ------------------ | ------------------------------------------------------ | ----------------------------------------------------- |
-| `ready`            | the socket that just connected                         | `{ userId, role }`                                    |
-| `unauthorized`     | a socket about to be disconnected                      | `{ message }`                                         |
-| `ticket.changed`   | staff of the company, and the requester of that ticket | `{ ticketId, action, actorId, oldValues, newValues }` |
-| `report.completed` | only whoever requested it                              | `{ reportId, rowCount, error: null }`                 |
-| `report.failed`    | only whoever requested it                              | `{ reportId, rowCount: null, error }`                 |
+| Event              | Sent to                                                    | Payload                                               |
+| ------------------ | ---------------------------------------------------------- | ----------------------------------------------------- |
+| `ready`            | the socket that just connected                             | `{ userId, role }`                                    |
+| `unauthorized`     | a socket about to be disconnected                          | `{ message }`                                         |
+| `ticket.changed`   | the company's admins, the ticket's assignee, its requester | `{ ticketId, action, actorId, oldValues, newValues }` |
+| `report.completed` | only whoever requested it                                  | `{ reportId, rowCount, error: null }`                 |
+| `report.failed`    | only whoever requested it                                  | `{ reportId, rowCount: null, error }`                 |
 
 `ticket.changed` carries the same `action` vocabulary as the timeline, so a client can reuse one
 renderer for both.
 
 **Two rooms, and they are the whole access-control story.** A connection joins `user:<id>` always,
-and `tenant:<id>:staff` only if it is an `ADMIN` or an `AGENT`. Broadcasting to a plain per-tenant
-room would hand a `REQUESTER` every ticket in the company over the socket — with no controller
-involved to refuse it, and nothing in the HTTP tests to notice.
+and `tenant:<id>:admins` only if it is an `ADMIN`. Broadcasting to a plain per-tenant room would
+hand a `REQUESTER` every ticket in the company over the socket — with no controller involved to
+refuse it, and nothing in the HTTP tests to notice. An `AGENT` is not in the admin room either, for
+the same reason it does not see those tickets over HTTP: it hears about the tickets assigned to it,
+through its own `user:<id>`.
 
-**`internal_note_added` goes to staff only.** The whole point of it being a separate action is that
-the customer never learns the note exists, and that has to hold on the socket as much as on the
-timeline.
+**One event goes to somebody who can no longer read the ticket, on purpose.** A reassignment is
+delivered to the agent it _left_ as well as the agent it reached, because that agent's queue has to
+drop the row. Use it to remove the row — do not refetch the ticket, which now answers 404.
+
+**`internal_note_added` skips the requester.** It still reaches the company's admins and the agent
+working the ticket. The whole point of it being a separate action is that the customer never learns
+the note exists, and that has to hold on the socket as much as on the timeline.
 
 A report notification is addressed to one person, never to a room: the file was built through its
 requester's own visibility, so its very existence is theirs.
@@ -694,6 +730,26 @@ Real bodies:
 }
 ```
 
+The other two `RolesGuard` bodies are the ones a client meets because of the visibility rule, and
+they are worth quoting because the message names the roles the route accepts — an agent opening a
+ticket, and an agent touching `/assignee`, including to unassign itself:
+
+```json
+{
+  "message": "This route requires one of: ADMIN, REQUESTER",
+  "error": "Forbidden",
+  "statusCode": 403
+}
+```
+
+```json
+{
+  "message": "This route requires one of: ADMIN",
+  "error": "Forbidden",
+  "statusCode": 403
+}
+```
+
 ```json
 {
   "message": "Unauthorized",
@@ -710,8 +766,20 @@ Real today, and a client will meet them:
 
 - **A ticket cannot be reopened once `CLOSED`.** The intended flow is a new ticket that references
   it; there is no field for that reference yet.
-- **A ticket cannot be opened on somebody else's behalf.** The requester is always the caller, so an
-  agent taking a phone call has to open it as themselves.
+- **A ticket cannot be opened on somebody else's behalf, and an `AGENT` cannot open one at all.**
+  The requester is always the caller, so the person taking the phone call is an `ADMIN` and the
+  ticket ends up theirs rather than the caller's. This got worse rather than better with the
+  visibility rule, and it was a deliberate trade: leaving `POST /tickets` open to an agent would
+  have handed it a way around the rule, since the author of a ticket sees it. An "on behalf of"
+  field that names a requester the admin may not impersonate is the fix, and it is not written.
+- **Nobody sees an unassigned ticket except an `ADMIN` and its author.** An agent cannot pick work
+  out of a shared queue, because there is no queue it can see. That is the cost of assignment being
+  the permission, and it is stated rather than hidden: a company with no admin watching the inbox
+  has tickets nobody is working.
+- **A staff member who is a ticket's requester but not its assignee is not pushed
+  `internal_note_added`.** An `ADMIN` is unaffected — the admin room gets it — so this only bites a
+  legacy ticket opened by an agent. The note is not hidden from them, merely not pushed: the thread
+  shows it on the next read, and any client refetches on `ticket.changed`.
 - **There is no attachment.** `MAIN.md` foresees object storage; nothing in the API accepts a file.
 - **The report CSV lives in a database column**, bounded by `REPORTS_MAX_ROWS`. A report that hits
   the cap is truncated rather than refused, and `rowCount` is the only signal.
@@ -725,6 +793,135 @@ Real today, and a client will meet them:
 _Everything in this part is measured in this repository, against Prisma 7.9.1, PostgreSQL 17,
 BullMQ 6.2.0 and `@nestjs/event-emitter` 3.1.0 — not taken from documentation. Sections appear here
 as each phase produces its measurement._
+
+### Assignment became the permission, and that forced it to be an ADMIN route
+
+The two rules read like two restrictions and they are one. Once an agent stops seeing a ticket
+nobody assigned to it, an agent **cannot assign one to itself**: `mutate()` calls `load()` first, and
+`load()` answers 404 for a ticket outside the caller's scope, long before the version check or the
+write. So the agent-assigns-itself path was already dead the moment the scope changed; putting
+`@Roles(ADMIN)` on the route only says out loud what the scope enforced silently.
+
+Unassigning is the direction that needed the guard for its own sake. An agent dropping a ticket it
+already holds _was_ reachable — it can see what is assigned to it — and it would erase the ticket
+from the only queue that shows it, leaving nothing but an admin's inbox to find it again. That is
+the case the 403 exists for, and `test/e2e/tickets.e2e-spec.ts` asserts it explicitly rather than
+assuming the route-level answer covers it.
+
+`POST /tickets` follows from the same place. The author of a ticket sees it, so an agent that could
+open one could open its way to visibility — the rule would hold on every path except the one that
+creates rows.
+
+### Intersection replaced the spread-last trick, and the `OR` that `search` writes is why
+
+The old scope was one column, so the mechanism was ordering: spread `{ requesterId: me }` last and it
+physically overwrote whatever the caller had asked for. `{ OR: [...] }` has no column to overwrite,
+and spread into the same object it does something worse — `findAll` already writes a top-level `OR`
+for `search`, and the second one **replaces** the first. The page would come back wider than the
+caller asked for rather than narrower, which is the one direction a visibility scope must never
+move. `AND` is a key no caller filter uses, so the scope can only ever remove rows.
+`src/tickets/tickets.service.spec.ts` pins it: with `search` set, both keys survive.
+
+Choosing `AND` over a strip-list — deleting `requesterId`, `assigneeId` and `unassigned` from a
+non-admin's query before composing — was deliberate. The strip-list preserves the old observable
+behaviour, and it costs a list somebody has to remember to extend the next time a filter is added.
+It also makes the API answer a question nobody asked: `?assigneeId=<colleague>` would come back
+holding the caller's own tickets, under a heading the client wrote saying "colleague's queue". Under
+intersection the answer is empty, which is honest, and narrowing can never leak.
+
+The e2e test that covered the old behaviour is worth a note of its own: it asserted
+`page.data.every(t => t.requester.email === mine)`, and `[].every()` is `true` — so it would have
+passed against the new behaviour without asserting anything at all. It was replaced with an explicit
+`toHaveLength(0)` and `meta.total === 0`.
+
+`unassigned=true` needed no special case and gets a sensible answer by construction: intersected
+with the caller's scope it becomes `assigneeId = null AND (requesterId = me OR assigneeId = me)`,
+whose second arm is unsatisfiable, leaving the tickets they opened that nobody picked up. The 400
+that refuses `unassigned` together with `assigneeId` stays where it is — it is about a contradiction
+in what the _caller_ said, and empty and 400 are different answers.
+
+### `load()` did not change, and that was the point of keying on `AND`
+
+`{ id, ...visibleTo(requester) }` became `{ id, AND: [{ OR: [...] }] }` without an edit, because the
+fragment is keyed rather than spread. That matters more than it looks: `load()` is the chokepoint
+every 404 in this slice comes out of, reached by `requireTicket()` and by `mutate()`, so a rule
+change that cannot touch it is a rule change that cannot break it.
+
+Everything downstream inherited the new scope with no code of its own — the comment routes, the
+ticket timeline, the report export, and all three mutations. The tests moved; the code did not. The
+report export is the strongest evidence: `test/integration/reports-queue.int-spec.ts` asserts that an
+agent's CSV holds only the ticket assigned to it, which means the scope survived the trip through
+Redis into a worker that has no request context to inherit one from.
+
+### The three predicates finally diverged
+
+`seesEveryTicket()`, `handlesInternalNotes()` and `joinsStaffRoom()` had identical bodies, and each
+carried a docblock explaining that they were deliberate duplicates because they answered different
+questions that happened to share an answer — and that binding them would be an accident waiting for
+one to change.
+
+One changed. `seesEveryTicket()` is now `ADMIN` alone; `joinsAdminRoom()` followed it, because the
+broadcast room is exactly the company-wide view; and `handlesInternalNotes()` stayed `ADMIN || AGENT`,
+because an agent working a ticket still writes its internal note — the ticket-level 404 decides
+_which_ ticket it reaches, and that predicate only decides _what_ it may do on one it can already
+see.
+
+Had the three been collapsed into one helper when they looked identical, narrowing visibility would
+have silently taken the internal note away from the only person using it. This is the clearest
+argument in the repository for the convention, and it is worth keeping the comments updated rather
+than deleting them: the first line of `internal-notes.ts` now says the bodies _used to_ match.
+
+### A `400` does not prove the ticket exists, and a `403` can hide a malformed body
+
+Nest runs the guard, then the pipe, then the handler, and the visibility rule lives in the handler's
+service. So the order decides which of three answers a caller gets, and two of the outcomes read
+backwards from the outside. Measured against the running application, as an `AGENT` on a ticket
+assigned to somebody else:
+
+| Request                                            | Answer | Why                                                |
+| -------------------------------------------------- | ------ | -------------------------------------------------- |
+| `PATCH /tickets/:id` with a valid body             | `404`  | the service ran and `load()` found nothing visible |
+| `PATCH /tickets/:id` with `title` shorter than 3   | `400`  | the pipe rejected it before the service ever ran   |
+| `PATCH /tickets/:id/assignee` with any body at all | `403`  | the guard rejected it before the pipe ever ran     |
+
+The middle row is the one that matters, and it is the reason this is written down: **a `400` says
+nothing about whether the ticket exists**, only that the payload never got far enough to be asked.
+A client that treats a validation error as evidence of a real resource — enabling a form, keeping a
+row on screen, retrying with a fix — is reading a signal that is not there. It is not a leak either:
+the message describes the caller's own payload and names no row.
+
+The third row is the mirror image and is harmless, but it surprises a test. The same empty body
+`{}`, sent to the same ticket, measured three ways:
+
+| Sent by | To          | Answer                                                                  |
+| ------- | ----------- | ----------------------------------------------------------------------- |
+| `AGENT` | `/status`   | `400` — `version` and `status` both reported missing                    |
+| `AGENT` | `/assignee` | `403` — `This route requires one of: ADMIN`, and the DTO is never asked |
+| `ADMIN` | `/assignee` | `400` — `version` and `assigneeId` both reported missing                |
+
+So a spec that asserts `400` while acting as an agent is asserting the guard, not the DTO. That is
+why the assignment specs in `test/e2e/tickets.e2e-spec.ts` switch the **actor** to an `ADMIN` rather
+than switching the expectation: `rejects a missing assigneeId rather than treating it as unassign`
+runs as `adminA` and still expects `400`, while `refuses an agent the assignment route with 403`
+keeps the agent and expects the guard.
+
+### `POST /tickets` answered the operator with a 500, and the guard is what fixed it
+
+Measured before changing anything, by writing the test first and reading the failure:
+
+```
+● refuses the platform operator with 403
+  expected 403 "Forbidden", got 500 "Internal Server Error"
+```
+
+`CompaniesService.create` creates a `ticket_counters` row per company; `PlatformBootstrapService`
+does not create one for the reserved platform tenant. So `TicketsService.create` found no counter
+and threw the deliberate plain `Error` that says the data is broken rather than the request — which
+is the right exception for the situation it was written for, and the wrong answer to a route the
+operator should never have reached. `@Roles(ADMIN, REQUESTER)` stops it at the guard.
+
+Worth remembering as a shape rather than a fact: a route with no `@Roles()` is reachable by the
+`ADMIN_MASTER`, whose tenant is not a company and does not have a company's rows.
 
 ### Per-tenant ticket numbering, and the operation that makes it safe
 
@@ -1031,29 +1228,60 @@ in the spreadsheet.
 yields `"[object Object]"` without complaining, so a column added later that carries an object would
 land in a customer's spreadsheet rather than failing to compile.
 
-### The staff room is what keeps a requester out of another ticket's events
+### The admin room, and the personal room that replaced it for agents
 
 Three phases went into making a `REQUESTER` unable to read somebody else's ticket over HTTP. A
 gateway that broadcast every change to `tenant:<id>` would hand it to them anyway, over a socket,
 with no controller involved to refuse it — and **not one HTTP test would fail**. The visibility rule
 has to be re-established at this boundary, because the boundary is new.
 
-So a connection joins `user:<id>` and, only if it is staff, `tenant:<id>:staff`. A ticket event goes
-to the staff room and to `user:<requesterId>`; socket.io de-duplicates, so an agent who opened the
-ticket themselves still receives it once. `internal_note_added` skips the requester entirely.
+That argument then applied to the agents unchanged. When an agent stopped seeing the company's
+queue over HTTP, `tenant:<id>:staff` was still delivering all of it over the socket — the same hole,
+one role over. So the room became `tenant:<id>:admins` and holds admins alone, and an agent is
+addressed through its own `user:<id>`: it is the _ticket_ that entitles it to an event, not the
+role.
 
-`test/e2e/realtime.e2e-spec.ts` connects four real clients — an agent, the ticket's requester,
-another requester of the same company, and a requester of a different company — and asserts the last
-two hear **nothing**. The negative assertion is the one worth having; the positive ones would pass
-against a broadcast to everybody.
+The rename of the string is not cosmetic. A room still called `staff` while excluding the agents is
+a name somebody reads as a bug and then "fixes". It costs nothing on the wire, because this gateway
+pushes and takes no commands, so no client ever names a room.
 
-`requesterId` rides in the event payload for this. Looking it up in the gateway would mean a database
-read per event, on a listener with no request scope to read it in.
+`assigneeIds` rides in the payload alongside `requesterId`, for the same reason that one does:
+looking it up in the gateway would mean a database read per event, on a listener with no request
+scope to read it in. It is **required rather than optional**, and that is doing work — an emit site
+that forgot it would silently stop notifying the one person actually working the ticket, with no
+error and no failing HTTP test. Required means the compiler names every site; it named both when
+the field went in.
+
+It is plural because a reassignment concerns two people, and `mutate()` already holds `before` and
+`after`, so both sides come for free and no future mutation can forget them. **The agent that lost
+the ticket is told**, which is the one event in the system addressed to somebody who can no longer
+read its subject: it exists so their queue drops the row, and Part I says to use it that way rather
+than to refetch.
+
+A `REQUESTER` never lands in `assigneeIds`, and what guarantees that is `assertAssignable()`
+answering 409 to a requester as a target. That guard is doing double duty now — it keeps the socket
+honest, not only the domain.
+
+The fan-out is **one `emit` over a list of rooms** rather than one call per room. socket.io
+de-duplicates the sockets within a call and not across two, so the previous shape delivered the same
+change twice to anybody who was in two of the rooms — an admin who was also the requester, for
+instance. That was a real defect the rewrite removed on the way past.
+
+`test/e2e/realtime.e2e-spec.ts` connects five real clients — an admin, an agent nobody assigned the
+ticket to, the ticket's requester, another requester of the same company, and a requester of a
+different company — and asserts the last three hear **nothing**. The negative assertion is the one
+worth having; the positive ones would pass against a broadcast to everybody. The agent is the
+assertion that would have been missing before.
+
+`src/realtime/notifications.gateway.spec.ts` pins the room list itself, which is cheaper and
+sharper than the e2e for the shape of the fan-out: the admin room is always in it, every id in
+`assigneeIds` is, the requester is except on `internal_note_added`, and an unassigned ticket adds no
+stray room.
 
 ### The gateway re-reads the role, for the same reason `JwtStrategy` does
 
 A socket outlives an access token's fifteen minutes by hours. Trusting the `role` claim would leave
-an agent demoted — or deactivated — after connecting sitting in the staff room for as long as they
+an admin demoted — or deactivated — after connecting sitting in the admin room for as long as they
 keep the tab open, receiving every ticket in the company.
 
 So the handshake verifies the token, then opens a tenant scope by hand and reads the user row, the

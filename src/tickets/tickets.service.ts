@@ -34,7 +34,20 @@ import {
   toTicketResponse,
 } from './ticket-response';
 import { canTransition } from './ticket-transitions';
-import { seesEveryTicket } from './ticket-visibility';
+import { seesEveryTicket, ticketsInvolving } from './ticket-visibility';
+
+/**
+ * Who a change concerns, besides the company's admins.
+ *
+ * `assignees` takes both sides of the mutation — before and after — because
+ * only a reassignment has two, and asking every caller to work out which case
+ * it is in would be a branch per action. `emit()` drops the nulls and the
+ * duplicate.
+ */
+type Audience = {
+  requesterId: string;
+  assignees: readonly (string | null)[];
+};
 
 /** What a mutation reports to the trail, built after the write has committed. */
 type AuditChange = {
@@ -58,10 +71,12 @@ export type PaginatedTickets = {
  * `where` and stamps it into every `data`. Every cross-tenant 404 in the e2e
  * suite is produced by code that is not in this file.
  *
- * **Visibility is applied last.** `visibleTo()` is spread after the caller's
- * own filters so that a `REQUESTER` passing `?requesterId=<someone else>` has
- * it overwritten rather than honoured — the same ordering trick the extension
- * uses for `tenantId`.
+ * **Visibility is intersected, not applied last.** `visibleTo()` contributes an
+ * `AND` rather than overwriting a key of the caller's, because the scope is an
+ * `OR` over two columns and there is no single key left to overwrite. A
+ * `REQUESTER` passing `?requesterId=<someone else>` therefore gets an empty
+ * page rather than their own tickets — the answer is honest instead of merely
+ * safe, and narrowing is the only thing a filter can do.
  *
  * **Every mutation goes through `mutate()`.** It is the one place the version
  * check lives, and a second copy of it would be a second place for a
@@ -119,17 +134,24 @@ export class TicketsService {
     });
 
     const response = toTicketResponse(ticket);
-    this.emit(requester, response.id, response.requester.id, {
-      action: AUDIT_ACTIONS.Created,
-      oldValues: {},
-      newValues: {
-        number: response.number,
-        title: response.title,
-        status: response.status,
-        priority: response.priority,
-        category: response.category,
+    // Always unassigned: `POST /tickets` takes no assigneeId, so a new ticket
+    // reaches nobody's queue until an admin puts it there.
+    this.emit(
+      requester,
+      response.id,
+      { requesterId: response.requester.id, assignees: [] },
+      {
+        action: AUDIT_ACTIONS.Created,
+        oldValues: {},
+        newValues: {
+          number: response.number,
+          title: response.title,
+          status: response.status,
+          priority: response.priority,
+          category: response.category,
+        },
       },
-    });
+    );
 
     return response;
   }
@@ -166,7 +188,10 @@ export class TicketsService {
             ],
           }
         : {}),
-      // Last, so it wins over anything the caller asked for.
+      // Last, and under `AND`: it intersects with what the caller asked for
+      // rather than overwriting it, so a filter can only ever narrow the
+      // answer. Spreading it here would replace the `OR` that `search` writes
+      // four lines up.
       ...this.visibleTo(requester),
     };
 
@@ -327,9 +352,13 @@ export class TicketsService {
    * would be a second place for the visibility rule to drift.
    *
    * Both ways of failing produce the same 404. Another tenant's id is filtered
-   * out by the extension; another requester's ticket is filtered out by
-   * `visibleTo()`. A 403 in either case would confirm that the id exists,
-   * which is a fact about somebody else's data.
+   * out by the extension; a ticket the caller neither opened nor is working is
+   * filtered out by `visibleTo()`. A 403 in either case would confirm that the
+   * id exists, which is a fact about somebody else's data.
+   *
+   * This is also where the new visibility rule reaches everything else without
+   * a line of its own: comments, the timeline, the report export and all three
+   * mutations resolve their ticket through here.
    */
   async requireTicket(
     id: string,
@@ -411,7 +440,19 @@ export class TicketsService {
     // After the transaction, never inside it. An event emitted from within the
     // callback would announce a change that a later statement could still roll
     // back, and the trail would record something that never happened.
-    this.emit(requester, after.id, before.requesterId, audit(before, after));
+    // Both sides of the assignee, every time. `mutate()` already holds `before`
+    // and `after`, so the reassignment — the one change that concerns two
+    // agents, the one it reached and the one it left — costs no branch of its
+    // own, and no future mutation can forget it.
+    this.emit(
+      requester,
+      after.id,
+      {
+        requesterId: before.requesterId,
+        assignees: [before.assigneeId, after.assignee?.id ?? null],
+      },
+      audit(before, after),
+    );
 
     return after;
   }
@@ -419,21 +460,27 @@ export class TicketsService {
   /**
    * The single place this service talks to the outside world about a change.
    *
-   * It emits and does not await: listeners are the audit trail and, later, the
+   * It emits and does not await: listeners are the audit trail and the
    * notification gateway, and neither is allowed to make a request slower or to
    * fail it. `tenantId` rides in the payload because a listener has no promise
    * of inheriting the request's scope — see `audit.events.ts`.
+   *
+   * The audience is normalised here rather than at the two call sites: the
+   * common case names one assignee twice, the reassignment is the only one with
+   * two, and neither caller should have to remember to drop the nulls or the
+   * duplicate.
    */
   private emit(
     actor: AuthenticatedUser,
     ticketId: string,
-    requesterId: string,
+    audience: Audience,
     change: AuditChange,
   ): void {
     const event: TicketEvent = {
       tenantId: actor.tenantId,
       actorId: actor.id,
-      requesterId,
+      requesterId: audience.requesterId,
+      assigneeIds: [...new Set(audience.assignees.filter((id) => id !== null))],
       entityType: AUDIT_ENTITIES.Ticket,
       entityId: ticketId,
       action: change.action,
@@ -450,11 +497,27 @@ export class TicketsService {
   /**
    * What the caller is allowed to see, as a `where` fragment.
    *
-   * An empty object for staff, so it composes with any other filter without a
-   * branch at the call site.
+   * An empty object for an `ADMIN`, so it composes with any other filter
+   * without a branch at the call site.
+   *
+   * For everybody else it goes under `AND`, and never as a spread of the
+   * scope's own keys. That is the part that changed with the rule. The old
+   * scope was one column, so writing `requesterId` last physically overwrote
+   * whatever the caller had asked for. An `OR` cannot overwrite a column, and
+   * spread last it would do something worse: silently replace the `OR` that
+   * `search` writes in `findAll`, widening the page instead of narrowing it.
+   * `AND` is a key no caller filter uses, so the scope can only ever remove
+   * rows.
+   *
+   * The consequence a client sees is deliberate: a filter is now intersected
+   * with the scope rather than losing to it, so `?requesterId=<somebody else>`
+   * from a requester answers an empty page instead of quietly answering a
+   * different question.
    */
   private visibleTo(requester: AuthenticatedUser): Prisma.TicketWhereInput {
-    return seesEveryTicket(requester.role) ? {} : { requesterId: requester.id };
+    return seesEveryTicket(requester.role)
+      ? {}
+      : { AND: [ticketsInvolving(requester.id)] };
   }
 
   /**
