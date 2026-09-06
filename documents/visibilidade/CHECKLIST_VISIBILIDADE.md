@@ -31,8 +31,8 @@ aqui → commit → parar e perguntar antes da próxima fase.
 | 0 — Branch e documentos        | ✅ concluída | `a389b2d` |
 | 1 — O escopo                   | ✅ concluída | `77ff34b` |
 | 2 — Os guards                  | ✅ concluída | `40b2b59` |
-| 3 — Eventos e WebSocket        | ✅ concluída | —         |
-| 4 — Documentação de referência | ⏳ pendente  | —         |
+| 3 — Eventos e WebSocket        | ✅ concluída | `10ee60a` |
+| 4 — Documentação de referência | ✅ concluída | —         |
 | 5 — O plano de frontend        | ⏳ pendente  | —         |
 
 ---
@@ -210,26 +210,38 @@ nomeia os três lugares.
 
 ## Fase 4 — Documentação de referência
 
-- [ ] `CLAUDE.md` — "Real-time notifications" (`:360-369`), errado no nome da sala e na composição;
+- [x] `CLAUDE.md` — "Real-time notifications" (`:360-369`), errado no nome da sala e na composição;
       e a linha final da seção de concorrência otimista, que fala em "staff room"
-- [ ] `documents/important/HELPDESK.md` Parte I — tabela "Who sees which ticket", tabela de
+- [x] `documents/important/HELPDESK.md` Parte I — tabela "Who sees which ticket", tabela de
       endpoints, tabela de query params (o que `unassigned` significa para um não-admin), a seção do
       socket, o catálogo de erros e **"Known gaps"**
-- [ ] `HELPDESK.md` Parte II — quatro seções novas: por que A e B são a mesma regra; interseção no
+- [x] `HELPDESK.md` Parte II — quatro seções novas: por que A e B são a mesma regra; interseção no
       lugar da sobrescrita e o `OR` do `search` que a força; os três predicados que divergiram; e a
       reescrita de "The staff room is what keeps a requester out of another ticket's events"
-- [ ] `documents/TESTE_MANUAL.md` — as subseções `ADMIN_MASTER`, `ADMIN`, `AGENT` (três afirmações
+- [x] `documents/TESTE_MANUAL.md` — as subseções `ADMIN_MASTER`, `ADMIN`, `AGENT` (três afirmações
       falsas) e `REQUESTER`; o roteiro `### Visibilidade`, cujo passo "entre como agente: 200" vira
       404; e um passo no "Semear do zero" para haver o que testar
-- [ ] `documents/helpdesk/GUIA_FRONTEND_HELPDESK.md` — o contrato novo inteiro
-- [ ] `CHECKLIST_HELPDESK.md` e `PLANO_HELPDESK.md` recebem **nota datada**, não reescrita: são
+- [x] `documents/helpdesk/GUIA_FRONTEND_HELPDESK.md` — o contrato novo inteiro
+- [x] `CHECKLIST_HELPDESK.md` e `PLANO_HELPDESK.md` recebem **nota datada**, não reescrita: são
       registro histórico da fase
+
+### Não estava no plano
+
+- [x] `CLAUDE.md` ganhou uma seção nova de arquitetura — **"Who sees which ticket"** — e não só a
+      correção do parágrafo de realtime. A regra é a mais load-bearing da fatia e não estava
+      declarada em lugar nenhum daquele arquivo
+- [x] `TESTE_MANUAL.md`: as **três suposições em aberto** da §4 da spec foram respondidas, porque
+      esta fase as mediu de passagem — os dois DTOs exigem `version`, e a tabela de transições é
+      exaustiva por tipo em `ticket-transitions.ts`. Sobrou aberta só a do operador
+- [x] `documents/TESTE_MANUAL.md` entrou na branch aqui, já passando no `format:check`
 
 ### Verificação
 
-- [ ] `npm run format:check`
-- [ ] Nenhuma afirmação sobre visibilidade sobrou desatualizada — varrer `documents/` e `CLAUDE.md`
-      atrás de "todos os chamados", "every ticket" e "staff"
+- [x] `npm run format:check`
+- [x] Nenhuma afirmação sobre visibilidade sobrou desatualizada — varridos `documents/` e
+      `CLAUDE.md` atrás de "todos os chamados", "every ticket", "staff" e `tenant:<id>:staff`. O que
+      sobrou são as duas notas históricas do helpdesk e as frases da Parte II que falam no passado
+- [x] Todo link relativo continua apontando para arquivo que existe
 
 ---
 
