@@ -10,11 +10,11 @@ que custou medição e seria caro redescobrir — vai para
 [`important/HELPDESK.md`](../important/HELPDESK.md), não para cá. É a mesma divisão que
 [`helpdesk/README.md`](../helpdesk/README.md) declara.
 
-| Arquivo                                                              | Leia quando                                                          |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [`PLANO_VISIBILIDADE.md`](./PLANO_VISIBILIDADE.md)                   | quiser entender a regra nova e o desenho da mudança de uma vez       |
-| [`CHECKLIST_VISIBILIDADE.md`](./CHECKLIST_VISIBILIDADE.md)           | quiser saber o que já foi entregue e o que continua pendente         |
-| [`PLANO_FRONTEND_VISIBILIDADE.md`](./PLANO_FRONTEND_VISIBILIDADE.md) | for adaptar o cliente Next.js ao contrato novo _(escrito na Fase 5)_ |
+| Arquivo                                                              | Leia quando                                                      |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`PLANO_VISIBILIDADE.md`](./PLANO_VISIBILIDADE.md)                   | quiser entender a regra nova e o desenho da mudança de uma vez   |
+| [`CHECKLIST_VISIBILIDADE.md`](./CHECKLIST_VISIBILIDADE.md)           | quiser saber o que já foi entregue e o que continua pendente     |
+| [`PLANO_FRONTEND_VISIBILIDADE.md`](./PLANO_FRONTEND_VISIBILIDADE.md) | for adaptar o cliente Next.js — o delta, com payloads capturados |
 
 A mudança altera o helpdesk descrito em [`helpdesk/`](../helpdesk/), que continua sendo o registro
 da feature original — aquela pasta não é reescrita, recebe nota datada.

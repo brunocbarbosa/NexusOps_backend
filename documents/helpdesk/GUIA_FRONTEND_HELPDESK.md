@@ -217,9 +217,10 @@ O detalhe completo está na Parte I de [`important/USERS.md`](../important/USERS
 | --------------------- | ---------------------------------------------------------- |
 | Login                 | `POST /auth/login`                                         |
 | Lista de chamados     | `GET /tickets` com filtros                                 |
-| Abrir chamado         | `POST /tickets`                                            |
+| Abrir chamado         | `POST /tickets` — só `ADMIN` e `REQUESTER`                 |
 | Detalhe do chamado    | `GET /tickets/:id`, `/comments`, `/timeline`               |
-| Ações do agente       | `PATCH /tickets/:id/status`, `/assignee`                   |
+| Ações do agente       | `PATCH /tickets/:id`, `/status`, `POST .../comments`       |
+| Atribuir (admin)      | `PATCH /tickets/:id/assignee` — só `ADMIN`                 |
 | Relatórios            | `POST /reports/tickets`, `GET /reports`, `/:id/download`   |
 | Usuários (admin)      | `GET`/`POST`/`PATCH` `/users` — ver `USERS.md`             |
 | Auditoria (admin)     | `GET /audit`                                               |

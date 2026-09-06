@@ -33,7 +33,7 @@ aqui → commit → parar e perguntar antes da próxima fase.
 | 2 — Os guards                  | ✅ concluída | `40b2b59` |
 | 3 — Eventos e WebSocket        | ✅ concluída | `10ee60a` |
 | 4 — Documentação de referência | ✅ concluída | —         |
-| 5 — O plano de frontend        | ⏳ pendente  | —         |
+| 5 — O plano de frontend        | ✅ concluída | —         |
 
 ---
 
@@ -247,15 +247,45 @@ nomeia os três lugares.
 
 ## Fase 5 — O plano de frontend
 
-- [ ] `documents/visibilidade/PLANO_FRONTEND_VISIBILIDADE.md` escrito **por último**, porque
-      descreve o contrato já implementado e verificado
-- [ ] `README.md` da pasta atualizado com a linha dele
+- [x] `documents/visibilidade/PLANO_FRONTEND_VISIBILIDADE.md` escrito **por último**, porque
+      descreve o contrato já implementado e verificado. Oito seções: a regra e as três consequências
+      que custam tela, o que muda em cada tela, o catálogo dos erros novos com o corpo real, o filtro
+      que virou interseção, o socket, o export, a ordem de adoção e a aceitação
+- [x] `README.md` da pasta atualizado com a linha dele — o `_(escrito na Fase 5)_` saiu
 
 ### Verificação
 
-- [ ] `npm run format:check`
-- [ ] Os payloads e códigos citados batem com o que a aplicação rodando devolve, não com o que o
-      plano supôs
+- [x] `npm run format:check`
+- [x] Os payloads e códigos citados batem com o que a aplicação rodando devolve, não com o que o
+      plano supôs. Capturado em 06/09/2026 contra `npm run start:dev` e o banco de desenvolvimento,
+      com quatro sockets abertos ao mesmo tempo para a matriz de eventos
+
+### Medido, e não deduzido
+
+- [x] Os quatro corpos de erro são cópia literal da resposta: `This route requires one of: ADMIN,
+REQUESTER` em `POST /tickets`, `This route requires one of: ADMIN` em `/assignee` e em `GET /audit`,
+      e `No ticket <id>` no 404
+- [x] O 404 do agente não atribuído vale para as **cinco** rotas do chamado, não só para o `GET` —
+      medido uma a uma
+- [x] `meta.total` no mesmo instante: admin 3, agente 1, o outro agente 1, requester 3
+- [x] `?unassigned=true`: admin 1, agente 0. `?requesterId=<outro>` como requester: `total: 0`.
+      `?assigneeId=<agente>` como requester: `total: 2` — o filtro estreita dentro do escopo
+- [x] O export: `rowCount` 3 para o admin e **1** para o agente, sem filtro nenhum nos dois pedidos,
+      e o CSV do agente traz exatamente o chamado atribuído a ele
+- [x] A matriz do socket com quatro conexões simultâneas, incluindo a asserção negativa (o agente sem
+      relação com o chamado não recebeu nada em nenhuma das quatro ações) e o **evento de despedida**:
+      o ex-responsável recebeu o `assigned` e, no mesmo segundo, `GET /tickets/:id` respondeu 404 para
+      ele e 200 para os outros três
+
+### Não estava no plano
+
+- [x] Duas armadilhas de ordem que o cliente precisa saber e que só apareceram medindo: o
+      `ValidationPipe` roda antes do serviço, então um payload inválido num chamado invisível responde
+      **400** e não 404; e o guard roda antes do pipe, então um payload inválido do agente em
+      `/assignee` responde **403** e não 400
+- [x] `documents/helpdesk/GUIA_FRONTEND_HELPDESK.md` — a tabela "Telas mínimas" da §9 sobreviveu à
+      Fase 4 dizendo `Ações do agente | PATCH /tickets/:id/status, /assignee`. Atribuir deixou de ser
+      ação de agente: a linha foi partida em duas e a de abrir chamado passou a dizer quem pode
 
 ---
 
