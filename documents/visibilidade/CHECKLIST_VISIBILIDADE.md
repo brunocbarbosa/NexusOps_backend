@@ -310,4 +310,4 @@ REQUESTER` em `POST /tickets`, `This route requires one of: ADMIN` em `/assignee
   5. dois sockets abertos e um `PATCH` do admin: o admin recebeu `ticket.changed` com
      `action: "updated"`, e o segundo agente **não recebeu nada**
 
-- [ ] PR aberto para `development`
+- [x] PR aberto para `development` — [#50](https://github.com/brunocbarbosa/NexusOps_backend/pull/50)
