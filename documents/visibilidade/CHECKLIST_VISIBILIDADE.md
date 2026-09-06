@@ -291,6 +291,23 @@ REQUESTER` em `POST /tickets`, `This route requires one of: ADMIN` em `/assignee
 
 ## Fechamento
 
-- [ ] `npm run test:all` e `npm run typecheck` numa árvore limpa
-- [ ] Verificação de ponta a ponta do `PLANO_VISIBILIDADE.md` executada contra a aplicação rodando
+- [x] `npm run test:all` e `npm run typecheck` numa árvore limpa — **232 unit, 95 integração, 163
+      e2e**, 43 suítes, nenhuma falha; os dois `tsconfig` limpos; `npx eslint "src/**/*.ts"` sem
+      `--fix` e `npm run format:check` verdes
+- [x] Verificação de ponta a ponta do `PLANO_VISIBILIDADE.md` executada contra a aplicação rodando
+      (`npm run start:dev`, banco de desenvolvimento, contas do `TESTE_MANUAL.md`). Os cinco passos,
+      com a saída real:
+
+  1. `agent@acme.com` em `POST /tickets` → **403**
+     (`This route requires one of: ADMIN, REQUESTER`)
+  2. `requester@acme.com` abriu o chamado #4 → o admin o encontrou na lista, o agente **não**, e
+     `GET /tickets/:id` como agente respondeu **404**
+  3. o admin atribuiu ao agente → como agente, `GET` **200**, `POST /comments` **201**,
+     `PATCH /status` **200** e `GET /timeline` **200**; `helpdesk@acme.com` continuou em **404** na
+     mesma URL
+  4. o agente em `PATCH /tickets/:id/assignee` com `assigneeId: null` → **403**
+     (`This route requires one of: ADMIN`) — nem para largar o que é dele
+  5. dois sockets abertos e um `PATCH` do admin: o admin recebeu `ticket.changed` com
+     `action: "updated"`, e o segundo agente **não recebeu nada**
+
 - [ ] PR aberto para `development`
