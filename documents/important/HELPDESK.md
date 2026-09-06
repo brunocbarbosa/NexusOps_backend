@@ -730,6 +730,26 @@ Real bodies:
 }
 ```
 
+The other two `RolesGuard` bodies are the ones a client meets because of the visibility rule, and
+they are worth quoting because the message names the roles the route accepts — an agent opening a
+ticket, and an agent touching `/assignee`, including to unassign itself:
+
+```json
+{
+  "message": "This route requires one of: ADMIN, REQUESTER",
+  "error": "Forbidden",
+  "statusCode": 403
+}
+```
+
+```json
+{
+  "message": "This route requires one of: ADMIN",
+  "error": "Forbidden",
+  "statusCode": 403
+}
+```
+
 ```json
 {
   "message": "Unauthorized",
@@ -850,6 +870,40 @@ Had the three been collapsed into one helper when they looked identical, narrowi
 have silently taken the internal note away from the only person using it. This is the clearest
 argument in the repository for the convention, and it is worth keeping the comments updated rather
 than deleting them: the first line of `internal-notes.ts` now says the bodies _used to_ match.
+
+### A `400` does not prove the ticket exists, and a `403` can hide a malformed body
+
+Nest runs the guard, then the pipe, then the handler, and the visibility rule lives in the handler's
+service. So the order decides which of three answers a caller gets, and two of the outcomes read
+backwards from the outside. Measured against the running application, as an `AGENT` on a ticket
+assigned to somebody else:
+
+| Request                                            | Answer | Why                                                |
+| -------------------------------------------------- | ------ | -------------------------------------------------- |
+| `PATCH /tickets/:id` with a valid body             | `404`  | the service ran and `load()` found nothing visible |
+| `PATCH /tickets/:id` with `title` shorter than 3   | `400`  | the pipe rejected it before the service ever ran   |
+| `PATCH /tickets/:id/assignee` with any body at all | `403`  | the guard rejected it before the pipe ever ran     |
+
+The middle row is the one that matters, and it is the reason this is written down: **a `400` says
+nothing about whether the ticket exists**, only that the payload never got far enough to be asked.
+A client that treats a validation error as evidence of a real resource — enabling a form, keeping a
+row on screen, retrying with a fix — is reading a signal that is not there. It is not a leak either:
+the message describes the caller's own payload and names no row.
+
+The third row is the mirror image and is harmless, but it surprises a test. The same empty body
+`{}`, sent to the same ticket, measured three ways:
+
+| Sent by | To          | Answer                                                                  |
+| ------- | ----------- | ----------------------------------------------------------------------- |
+| `AGENT` | `/status`   | `400` — `version` and `status` both reported missing                    |
+| `AGENT` | `/assignee` | `403` — `This route requires one of: ADMIN`, and the DTO is never asked |
+| `ADMIN` | `/assignee` | `400` — `version` and `assigneeId` both reported missing                |
+
+So a spec that asserts `400` while acting as an agent is asserting the guard, not the DTO. That is
+why the assignment specs in `test/e2e/tickets.e2e-spec.ts` switch the **actor** to an `ADMIN` rather
+than switching the expectation: `rejects a missing assigneeId rather than treating it as unassign`
+runs as `adminA` and still expects `400`, while `refuses an agent the assignment route with 403`
+keeps the agent and expects the guard.
 
 ### `POST /tickets` answered the operator with a 500, and the guard is what fixed it
 
