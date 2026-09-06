@@ -199,6 +199,32 @@ describe('Tickets (e2e)', () => {
       await http().post('/tickets').send({ title: 'anonymous' }).expect(401);
     });
 
+    // The role that *works* tickets is not the role that *opens* them. It is
+    // also a way around the visibility rule if left open: the author of a
+    // ticket sees it, so an agent could have opened its way to one.
+    it('refuses an agent with 403', async () => {
+      await as(agentA)
+        .post('/tickets')
+        .send({ title: 'not the agent job' })
+        .expect(403);
+    });
+
+    // 403 replaces a 500 here. The operator's reserved tenant has no
+    // ticket_counters row, so before the guard existed this route reached the
+    // service and threw on data that was never meant to be there.
+    it('refuses the platform operator with 403', async () => {
+      await as(operator)
+        .post('/tickets')
+        .send({ title: 'not the operator job' })
+        .expect(403);
+    });
+
+    it('still lets an admin open one', async () => {
+      const ticket = await open(adminA, { title: 'opened by the admin' });
+
+      expect(ticket.requester.email).toBe('admin@a.example');
+    });
+
     it.each([
       ['a title that is too short', { title: 'no' }],
       ['no title at all', {}],
@@ -484,6 +510,41 @@ describe('Tickets (e2e)', () => {
         .patch(`/tickets/${ticket.id}/assignee`)
         .send({ version: ticket.version })
         .expect(400);
+    });
+
+    it('refuses an agent the assignment route with 403', async () => {
+      const ticket = await open(requesterA, { title: 'not the agent call' });
+
+      await as(agentA)
+        .patch(`/tickets/${ticket.id}/assignee`)
+        .send({ version: ticket.version, assigneeId: agentA.user.id })
+        .expect(403);
+
+      // Not even to drop one that is already theirs: an agent leaving a ticket
+      // would erase it from the only queue that shows it.
+      const mine = await assign(ticket, agentA);
+      await as(agentA)
+        .patch(`/tickets/${mine.id}/assignee`)
+        .send({ version: mine.version, assigneeId: null })
+        .expect(403);
+    });
+
+    // Documented rather than special-cased: the filter intersects with the
+    // caller's scope, and `assigneeId: null` cannot also be the agent, so what
+    // is left is the tickets they opened that nobody picked up.
+    it('gives an agent asking for the unassigned queue only their own', async () => {
+      await open(requesterA, { title: 'nobody has this one' });
+
+      const page = bodyOf<PageBody>(
+        await as(agentA)
+          .get('/tickets?unassigned=true&perPage=100')
+          .expect(200),
+      );
+
+      expect(page.data.every((t) => t.assignee === null)).toBe(true);
+      expect(
+        page.data.every((t) => t.requester.email === 'agent@a.example'),
+      ).toBe(true);
     });
 
     it('filters by unassigned, and refuses the contradiction', async () => {

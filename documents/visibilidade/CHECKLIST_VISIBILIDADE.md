@@ -29,8 +29,8 @@ aqui → commit → parar e perguntar antes da próxima fase.
 | Fase                           | Estado       | Commit    |
 | ------------------------------ | ------------ | --------- |
 | 0 — Branch e documentos        | ✅ concluída | `a389b2d` |
-| 1 — O escopo                   | ✅ concluída | —         |
-| 2 — Os guards                  | ⏳ pendente  | —         |
+| 1 — O escopo                   | ✅ concluída | `77ff34b` |
+| 2 — Os guards                  | ✅ concluída | —         |
 | 3 — Eventos e WebSocket        | ⏳ pendente  | —         |
 | 4 — Documentação de referência | ⏳ pendente  | —         |
 | 5 — O plano de frontend        | ⏳ pendente  | —         |
@@ -131,26 +131,33 @@ O coração da mudança, e a fase de maior raio: quase todo o custo de teste est
 
 ## Fase 2 — Os guards (regras A e C)
 
-- [ ] `PATCH /tickets/:id/assignee` → `@Roles(UserRole.ADMIN)`, com o comentário dizendo que
+- [x] `PATCH /tickets/:id/assignee` → `@Roles(UserRole.ADMIN)`, com o comentário dizendo que
       atribuir virou concessão de acesso e não passo de fluxo
-- [ ] `POST /tickets` → `@Roles(UserRole.ADMIN, UserRole.REQUESTER)`, e o comentário "Any
+- [x] `POST /tickets` → `@Roles(UserRole.ADMIN, UserRole.REQUESTER)`, e o comentário "Any
       authenticated user opens a ticket" reescrito
-- [ ] Docblock da classe do controller (`:23-34`) — a divisão agora é tripla
-- [ ] `src/tickets/dto/create-ticket.dto.ts` — o docblock do "on behalf of"
+- [x] Docblock da classe do controller (`:23-34`) — a divisão agora é tripla
+- [x] `src/tickets/dto/create-ticket.dto.ts` — o docblock do "on behalf of"
 
 ### Testes
 
-- [ ] 403 do agente em `POST /tickets`
-- [ ] 403 do agente em `/assignee`, **inclusive tentando se desatribuir**
-- [ ] 403 do `ADMIN_MASTER` em `POST /tickets` — **hoje é 500**, porque o tenant reservado não tem
+- [x] 403 do agente em `POST /tickets`
+- [x] 403 do agente em `/assignee`, **inclusive tentando se desatribuir**
+- [x] 403 do `ADMIN_MASTER` em `POST /tickets` — **hoje é 500**, porque o tenant reservado não tem
       linha em `ticket_counters`; confirmar o 500 antes de mudar, para o teste registrar o ganho
-- [ ] `describe('assignment')` do e2e: os quatro testes trocam o ator para `adminA`. Atenção à ordem
+- [x] `describe('assignment')` do e2e: os quatro testes trocam o ator para `adminA`. Atenção à ordem
       guard-antes-de-pipe: como agente eles receberiam 403 e falhariam pelo motivo errado
-- [ ] `unassigned=true` de um agente devolve só os dele — o comportamento documentado
+- [x] `unassigned=true` de um agente devolve só os dele — o comportamento documentado
 
 ### Verificação
 
-- [ ] `npm run test:all`, `npm run typecheck`, eslint
+- [x] `npm run test:all` verde — 216 unit, 95 integração, 161 e2e
+- [x] `npm run typecheck` e eslint sem `--fix`
+
+### Medido antes de mudar
+
+- [x] `POST /tickets` como `ADMIN_MASTER` respondia **500** de fato — confirmado rodando o teste
+      novo contra o código antigo, que falhou com `expected 403 "Forbidden", got 500 "Internal
+  Server Error"`. O agente respondia **201**
 
 ---
 
