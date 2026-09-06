@@ -12,7 +12,7 @@ import {
  * "I forgot to scope this query" is not a reachable state. Services must never write
  * a tenant filter by hand -- a hand-written filter is one that can be wrong.
  *
- * What it does NOT cover, measured against Prisma 7.9.1:
+ * What it does NOT cover, measured against Prisma 7.10.0:
  *  - $queryRaw / $executeRaw. Those are client operations, not model operations, so
  *    they never reach this hook. Row-Level Security is the only cover for them.
  *  - Nested access. `include: {}` intercepts only the parent operation, and so does a

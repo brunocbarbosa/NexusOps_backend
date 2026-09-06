@@ -30,7 +30,7 @@ describe('CompaniesService', () => {
   const duplicate = () =>
     new Prisma.PrismaClientKnownRequestError('duplicate', {
       code: 'P2002',
-      clientVersion: '7.9.1',
+      clientVersion: '7.10.0',
     });
 
   let prisma: {

@@ -18,7 +18,7 @@ in `documents/`; execution records (plan, checklist) do too.
 | [`HELPDESK.md`](./HELPDESK.md)                   | touching `src/tickets/`, `src/comments/`, `src/audit/`, `src/reports/`, `src/realtime/` or `src/events/` |
 | [`RLS_NOTES.md`](./RLS_NOTES.md)                 | implementing Row-Level Security — which **does not exist yet** in the code                               |
 
-All of them were measured against this repository's versions — Prisma 7.9.1, PostgreSQL 17, bcrypt
+All of them were measured against this repository's versions — Prisma 7.10.0, PostgreSQL 17, bcrypt
 6.0.0, class-transformer 0.5.1, BullMQ 6.2.0, `@nestjs/event-emitter` 3.1.0 and `pg` 8.23 — not
 taken from documentation. An upgrade of any of them is reason
 to re-check these; the suites in `test/integration/` are what will tell you if something stopped

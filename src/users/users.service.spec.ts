@@ -17,7 +17,7 @@ import { UsersService } from './users.service';
 const duplicate = () =>
   new Prisma.PrismaClientKnownRequestError('duplicate', {
     code: 'P2002',
-    clientVersion: '7.9.1',
+    clientVersion: '7.10.0',
   });
 
 describe('UsersService', () => {

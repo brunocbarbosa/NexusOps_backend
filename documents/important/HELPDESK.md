@@ -790,7 +790,7 @@ Real today, and a client will meet them:
 
 ## Part II — measured behaviour
 
-_Everything in this part is measured in this repository, against Prisma 7.9.1, PostgreSQL 17,
+_Everything in this part is measured in this repository, against Prisma 7.10.0, PostgreSQL 17,
 BullMQ 6.2.0 and `@nestjs/event-emitter` 3.1.0 — not taken from documentation. Sections appear here
 as each phase produces its measurement._
 
@@ -953,7 +953,7 @@ Measured, not assumed: `test/integration/ticket-numbering.int-spec.ts` opens 20 
 `Promise.all` in one tenant that already held number 1, and asserts the batch is exactly 2..21 —
 sorted, because commit order is not resolve order. It also asserts that the other tenant, seeded
 alongside, is still at `last_number = 1`. `updateManyAndReturn` returning rows on PostgreSQL was
-verified against Prisma 7.9.1 rather than taken from the docs, because the design has no fallback
+verified against Prisma 7.10.0 rather than taken from the docs, because the design has no fallback
 that keeps the "no hand-written filter" rule.
 
 The unique index `@([tenantId, number])` is the backstop, not the mechanism. If the counter

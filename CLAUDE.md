@@ -37,7 +37,7 @@ Other documents, by purpose:
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the tenancy layer, in two parts: the contract a
 feature is written against — the API, what the extension does to each operation, and the checklist
-for adding a model — and the measured Prisma 7.9.1 behaviour it depends on; read it before editing
+for adding a model — and the measured Prisma 7.10.0 behaviour it depends on; read it before editing
 `src/tenancy/` or adding a tenant-scoped model), `USERS.md` (the auth and users reference, in two parts:
 the API contract a client integrates against — data model, every endpoint, every payload, every
 error — and the measured behaviour behind it; read it before editing `src/auth/`, `src/users/`, or
@@ -259,7 +259,7 @@ everywhere in the codebase:
   because `?? fallback` is exactly the silent bypass this design prevents. Use `requireTenantId()`,
   which returns a string or throws, and `runWithoutTenant()` when a read genuinely must be unscoped.
 
-The extension's measured behaviour against Prisma 7.9.1 — five findings the design depends on,
+The extension's measured behaviour against Prisma 7.10.0 — five findings the design depends on,
 including why nested access cannot be intercepted and why that hole is closed in the schema instead
 — is in **`documents/important/TENANCY_EXTENSION.md`**, Part II. Read it before editing anything in
 `src/tenancy/`, and re-check it after a Prisma upgrade. Part I of the same file is what a feature
