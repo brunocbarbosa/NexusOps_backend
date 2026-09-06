@@ -8,9 +8,18 @@ const trim = ({ value }: { value: unknown }): unknown =>
 /**
  * No `requesterId` and no `number`, and neither is an omission.
  *
- * The requester is the caller: an agent opening a ticket on someone else's
- * behalf is a real workflow and it is not this one, so rather than accept a
- * field the service would have to police, the route simply does not offer it.
+ * The requester is the caller, so rather than accept a field the service would
+ * have to police, the route simply does not offer it. Opening on somebody
+ * else's behalf is a real workflow and it is not this one — and it is now
+ * further away than it was: an `AGENT` cannot open a ticket at all, so the
+ * person taking the phone call is an `ADMIN`, and the ticket is theirs rather
+ * than the caller's. That cost is stated in HELPDESK.md under "Known gaps"
+ * instead of being softened here.
+ *
+ * No `assigneeId` either. Assignment decides who can see a ticket, so it is an
+ * `ADMIN` route with a version of its own — not a field on the form the person
+ * with the problem fills in.
+ *
  * The number comes from the tenant's counter, which is the only thing that can
  * hand out a sequence without a race.
  *

@@ -14,20 +14,37 @@ O stack alvo está no [`MAIN.md`](../MAIN.md): Next.js, TanStack Query, TanStack
 
 ## 1. A mesma URL responde coisas diferentes
 
-`GET /tickets/:id` pode devolver `200` para um agente e `404` para o colega de sala do requester.
-Isso não é erro de sistema, é a regra de visibilidade: um `REQUESTER` só enxerga os chamados que
-abriu; `AGENT` e `ADMIN` enxergam todos da empresa.
+`GET /tickets/:id` pode devolver `200` para o admin e `404` para o agente da sala ao lado. Isso não
+é erro de sistema, é a regra de visibilidade:
+
+| Papel       | Enxerga                      |
+| ----------- | ---------------------------- |
+| `ADMIN`     | todos os chamados da empresa |
+| `AGENT`     | **só os atribuídos a ele**   |
+| `REQUESTER` | só os que abriu              |
+
+Precisamente: quem não é `ADMIN` vê `requesterId = eu OU assigneeId = eu`. **Atribuir é o que dá e
+tira o acesso**, e por isso é rota exclusiva do `ADMIN` — um chamado sem responsável só aparece para
+o admin e para quem o abriu.
 
 Consequências para a interface:
 
 - **`404` não deve renderizar "algo deu errado".** Renderize "chamado não encontrado", com um
   caminho de volta para a lista. Um toast de erro genérico faz o usuário abrir um chamado
-  reclamando de um chamado.
+  reclamando de um chamado. E isso agora acontece com **agentes**, não só com requesters.
+- **A tela de "todos os chamados" é do admin.** Para um agente ela é a fila pessoal dele, e para um
+  requester, os chamados que abriu. É a mesma rota; o que muda é quem pergunta.
+- **A fila de não atribuídos (`?unassigned=true`) é uma tela de admin.** Para qualquer outro papel
+  ela intersecta com o escopo e devolve só o que a própria pessoa abriu e ninguém pegou — não é bug.
+- **O agente não tem botão de abrir chamado.** `POST /tickets` responde `403` a ele; a rota é de
+  `ADMIN` e `REQUESTER`.
+- **O controle de responsável é leitura para o agente.** `PATCH /tickets/:id/assignee` responde
+  `403` a ele, inclusive para largar um chamado que é dele.
 - **Não esconda botão por papel adivinhando.** O papel vem no `user` do login e no evento `ready` do
-  socket. As rotas de status e de atribuição exigem `ADMIN` ou `AGENT` e respondem `403`; a de
-  comentário interno também.
-- **Não confie em `?requesterId=`.** Para um `REQUESTER` o backend sobrescreve esse filtro com o id
-  dele. Um seletor de "ver chamados de" só faz sentido na tela do agente.
+  socket. As rotas de status e de nota interna continuam de `ADMIN` e `AGENT`.
+- **`?requesterId=` intersecta, não sobrescreve.** Para um `REQUESTER` pedindo o id de outra pessoa a
+  resposta é **lista vazia**, e não os chamados dele. Se a tela guarda filtro em estado ou na URL,
+  um filtro herdado de outra sessão pode esvaziar a lista sem erro nenhum aparecer.
 
 ## 2. O `409` de concorrência é a tela mais importante do produto
 
@@ -161,17 +178,26 @@ const socket = io(API_URL, {
 
 Eventos:
 
-| Evento             | Quem recebe                                | Uso na interface                           |
-| ------------------ | ------------------------------------------ | ------------------------------------------ |
-| `ticket.changed`   | staff da empresa, e o requester do chamado | invalidar `['ticket', id]` e `['tickets']` |
-| `report.completed` | só quem pediu                              | liberar o download                         |
-| `report.failed`    | só quem pediu                              | mostrar `error`                            |
+| Evento             | Quem recebe                                       | Uso na interface                           |
+| ------------------ | ------------------------------------------------- | ------------------------------------------ |
+| `ticket.changed`   | os admins, o responsável e o requester do chamado | invalidar `['ticket', id]` e `['tickets']` |
+| `report.completed` | só quem pediu                                     | liberar o download                         |
+| `report.failed`    | só quem pediu                                     | mostrar `error`                            |
 
 `ticket.changed` traz `{ ticketId, action, actorId, oldValues, newValues }`, com o mesmo vocabulário
 de `action` da timeline — dá para reusar um renderizador só para os dois.
 
 **Ignore o evento cuja `actorId` é o próprio usuário** se já atualizou o cache pela resposta HTTP;
 senão a tela pisca duas vezes na própria ação.
+
+**O `assigned` que tira o chamado do agente é a única exceção da regra.** Quando um chamado é
+reatribuído, o agente que o perdeu recebe esse último evento — sobre um chamado que ele já não pode
+ler. Use-o para **remover a linha da lista**, nunca para buscar o chamado: `GET /tickets/:id`
+responderia 404. É proposital, e é o que faz a fila dele se corrigir sozinha.
+
+O agente não está mais numa sala da empresa: ele recebe os eventos dos chamados dele pela sala
+pessoal. Na prática isso só muda uma coisa para a tela — **não presuma que um agente recebe evento de
+tudo**, então nada de contadores globais alimentados só pelo socket.
 
 ## 8. Autenticação, em uma tela
 
@@ -191,9 +217,10 @@ O detalhe completo está na Parte I de [`important/USERS.md`](../important/USERS
 | --------------------- | ---------------------------------------------------------- |
 | Login                 | `POST /auth/login`                                         |
 | Lista de chamados     | `GET /tickets` com filtros                                 |
-| Abrir chamado         | `POST /tickets`                                            |
+| Abrir chamado         | `POST /tickets` — só `ADMIN` e `REQUESTER`                 |
 | Detalhe do chamado    | `GET /tickets/:id`, `/comments`, `/timeline`               |
-| Ações do agente       | `PATCH /tickets/:id/status`, `/assignee`                   |
+| Ações do agente       | `PATCH /tickets/:id`, `/status`, `POST .../comments`       |
+| Atribuir (admin)      | `PATCH /tickets/:id/assignee` — só `ADMIN`                 |
 | Relatórios            | `POST /reports/tickets`, `GET /reports`, `/:id/download`   |
 | Usuários (admin)      | `GET`/`POST`/`PATCH` `/users` — ver `USERS.md`             |
 | Auditoria (admin)     | `GET /audit`                                               |

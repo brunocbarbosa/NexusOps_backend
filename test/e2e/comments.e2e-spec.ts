@@ -95,6 +95,23 @@ describe('Comments (e2e)', () => {
       await as(session).post('/tickets').send({ title }).expect(201),
     );
 
+  /**
+   * Opened by the requester and handed to the agent, as the admin.
+   *
+   * A thread is reachable to whoever can reach its parent ticket, so an agent
+   * that is not the assignee 404s on the whole conversation. Every test below
+   * where the agent talks needs the ticket to be theirs first.
+   */
+  const openAssigned = async (title: string): Promise<TicketBody> => {
+    const ticket = await open(requesterA, title);
+    return bodyOf<TicketBody>(
+      await as(adminA)
+        .patch(`/tickets/${ticket.id}/assignee`)
+        .send({ version: ticket.version, assigneeId: agentA.user.id })
+        .expect(200),
+    );
+  };
+
   beforeAll(async () => {
     app = (await createTestApp()) as INestApplication<App>;
     prisma = app.get<ExtendedPrismaClient>(PRISMA);
@@ -133,7 +150,7 @@ describe('Comments (e2e)', () => {
   });
 
   it('lets the requester and an agent talk on the same thread', async () => {
-    const ticket = await open(requesterA, 'conversation');
+    const ticket = await openAssigned('conversation');
 
     const mine = bodyOf<CommentBody>(
       await as(requesterA)
@@ -160,7 +177,7 @@ describe('Comments (e2e)', () => {
 
   describe('the internal note', () => {
     it('is invisible to the requester, in the page and in the total', async () => {
-      const ticket = await open(requesterA, 'with a note');
+      const ticket = await openAssigned('with a note');
 
       await as(requesterA)
         .post(`/tickets/${ticket.id}/comments`)
@@ -232,6 +249,29 @@ describe('Comments (e2e)', () => {
         .expect(404);
     });
 
+    // The rule reached the comment routes without a line of its own: they
+    // resolve the parent through the same `requireTicket()` the ticket routes
+    // do, so the thread appears and disappears with the assignment.
+    it('404s an agent the thread of a ticket that is not theirs', async () => {
+      const ticket = await open(requesterA, 'not the agent thread');
+
+      await as(agentA).get(`/tickets/${ticket.id}/comments`).expect(404);
+      await as(agentA)
+        .post(`/tickets/${ticket.id}/comments`)
+        .send({ body: 'butting in' })
+        .expect(404);
+    });
+
+    it('opens the thread to the agent the moment the ticket is assigned', async () => {
+      const ticket = await openAssigned('handed over thread');
+
+      await as(agentA).get(`/tickets/${ticket.id}/comments`).expect(200);
+      await as(agentA)
+        .post(`/tickets/${ticket.id}/comments`)
+        .send({ body: 'on it' })
+        .expect(201);
+    });
+
     it('404s a ticket that does not exist', async () => {
       await as(agentA).get(`/tickets/${randomUUID()}/comments`).expect(404);
     });
@@ -259,7 +299,7 @@ describe('Comments (e2e)', () => {
     };
 
     it('takes no new comments', async () => {
-      const ticket = await close(await open(requesterA, 'to be closed'));
+      const ticket = await close(await openAssigned('to be closed'));
 
       await as(agentA)
         .post(`/tickets/${ticket.id}/comments`)
@@ -268,7 +308,7 @@ describe('Comments (e2e)', () => {
     });
 
     it('stays readable', async () => {
-      const opened = await open(requesterA, 'closed but readable');
+      const opened = await openAssigned('closed but readable');
       await as(agentA)
         .post(`/tickets/${opened.id}/comments`)
         .send({ body: 'said before closing' })

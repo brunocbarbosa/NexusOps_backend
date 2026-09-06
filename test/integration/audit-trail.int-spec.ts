@@ -95,6 +95,7 @@ describe('audit trail', () => {
     let tenantA: string;
     let tenantB: string;
     let agentA: AuthenticatedUser;
+    let adminA: AuthenticatedUser;
     let requesterA: AuthenticatedUser;
     let requesterB: AuthenticatedUser;
 
@@ -123,8 +124,15 @@ describe('audit trail', () => {
             role: UserRole.REQUESTER,
           }),
         });
+        const admin = await prisma.user.create({
+          data: tenantScoped({
+            email: `admin@${label}.example`,
+            passwordHash: 'x',
+            role: UserRole.ADMIN,
+          }),
+        });
 
-        return { tenantId: tenant.id, agent, requester };
+        return { tenantId: tenant.id, agent, requester, admin };
       });
     };
 
@@ -153,6 +161,29 @@ describe('audit trail', () => {
         }),
       );
 
+    /**
+     * A ticket the agent can act on: opened by the requester, handed over by
+     * the admin.
+     *
+     * An agent reaches nothing it is not assigned to, so a test that has one
+     * change a status or write an internal note has to set that up. It costs a
+     * second trail entry — `assigned` — which is why the counts below are not
+     * the ones this file started with.
+     */
+    const openAssigned = async (title: string) => {
+      const ticket = await runWithTenant(tenantA, () =>
+        tickets.create({ title }, requesterA),
+      );
+
+      return runWithTenant(tenantA, () =>
+        tickets.assign(
+          ticket.id,
+          { version: ticket.version, assigneeId: agentA.id },
+          adminA,
+        ),
+      );
+    };
+
     beforeAll(async () => {
       mod = await Test.createTestingModule({
         imports: [
@@ -180,6 +211,12 @@ describe('audit trail', () => {
         tenantId: tenantA,
         email: a.agent.email,
         role: UserRole.AGENT,
+      };
+      adminA = {
+        id: a.admin.id,
+        tenantId: tenantA,
+        email: a.admin.email,
+        role: UserRole.ADMIN,
       };
       requesterA = {
         id: a.requester.id,
@@ -223,9 +260,7 @@ describe('audit trail', () => {
     });
 
     it('records a status change with both sides of it', async () => {
-      const ticket = await runWithTenant(tenantA, () =>
-        tickets.create({ title: 'moving' }, requesterA),
-      );
+      const ticket = await openAssigned('moving');
       await runWithTenant(tenantA, () =>
         tickets.changeStatus(
           ticket.id,
@@ -234,7 +269,7 @@ describe('audit trail', () => {
         ),
       );
 
-      const entries = await eventually(() => entriesFor(tenantA, ticket.id), 2);
+      const entries = await eventually(() => entriesFor(tenantA, ticket.id), 3);
       const change = entries.find((e) => e.action === 'status_changed');
 
       expect(change?.oldValues).toEqual({ status: 'OPEN' });
@@ -243,9 +278,7 @@ describe('audit trail', () => {
     });
 
     it('records a comment against the ticket, with its own action for a note', async () => {
-      const ticket = await runWithTenant(tenantA, () =>
-        tickets.create({ title: 'discussed' }, requesterA),
-      );
+      const ticket = await openAssigned('discussed');
       await runWithTenant(tenantA, () =>
         comments.create(ticket.id, { body: 'public' }, requesterA),
       );
@@ -257,7 +290,7 @@ describe('audit trail', () => {
         ),
       );
 
-      const entries = await eventually(() => entriesFor(tenantA, ticket.id), 3);
+      const entries = await eventually(() => entriesFor(tenantA, ticket.id), 4);
       const actions = entries.map((e) => e.action);
 
       expect(actions).toContain('commented');
@@ -303,9 +336,7 @@ describe('audit trail', () => {
       const query = { page: 1, perPage: 50 };
 
       it('hides the internal note from the requester, count included', async () => {
-        const ticket = await runWithTenant(tenantA, () =>
-          tickets.create({ title: 'timeline' }, requesterA),
-        );
+        const ticket = await openAssigned('timeline');
         await runWithTenant(tenantA, () =>
           comments.create(
             ticket.id,
@@ -313,7 +344,7 @@ describe('audit trail', () => {
             agentA,
           ),
         );
-        await eventually(() => entriesFor(tenantA, ticket.id), 2);
+        await eventually(() => entriesFor(tenantA, ticket.id), 3);
 
         const staffView = await runWithTenant(tenantA, () =>
           audit.timeline(ticket.id, query, agentA),
@@ -322,8 +353,10 @@ describe('audit trail', () => {
           audit.timeline(ticket.id, query, requesterA),
         );
 
-        expect(staffView.meta.total).toBe(2);
-        expect(customerView.meta.total).toBe(1);
+        // created + assigned + internal_note_added, and the customer sees the
+        // first two: the difference is the note, which is the whole assertion.
+        expect(staffView.meta.total).toBe(3);
+        expect(customerView.meta.total).toBe(2);
         expect(
           customerView.data.some((e) => e.action === 'internal_note_added'),
         ).toBe(false);

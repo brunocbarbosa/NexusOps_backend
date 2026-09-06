@@ -41,6 +41,7 @@ describe('TicketsService across tenants and requesters', () => {
   let requesterA1: AuthenticatedUser;
   let requesterA2: AuthenticatedUser;
   let agentA: AuthenticatedUser;
+  let adminA: AuthenticatedUser;
   let requesterB: AuthenticatedUser;
 
   const asUser = (
@@ -68,8 +69,9 @@ describe('TicketsService across tenants and requesters', () => {
       const one = await make(`one@${label}.example`, UserRole.REQUESTER);
       const two = await make(`two@${label}.example`, UserRole.REQUESTER);
       const staff = await make(`agent@${label}.example`, UserRole.AGENT);
+      const boss = await make(`admin@${label}.example`, UserRole.ADMIN);
 
-      return { tenantId: tenant.id, one, two, staff };
+      return { tenantId: tenant.id, one, two, staff, boss };
     });
   };
 
@@ -98,6 +100,7 @@ describe('TicketsService across tenants and requesters', () => {
     requesterA1 = asUser(a.one, tenantA, UserRole.REQUESTER);
     requesterA2 = asUser(a.two, tenantA, UserRole.REQUESTER);
     agentA = asUser(a.staff, tenantA, UserRole.AGENT);
+    adminA = asUser(a.boss, tenantA, UserRole.ADMIN);
     requesterB = asUser(b.one, tenantB, UserRole.REQUESTER);
   });
 
@@ -130,7 +133,7 @@ describe('TicketsService across tenants and requesters', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('does not show one requester a ticket of another in the same company', async () => {
+  it('shows a ticket to its requester and the company admin, and to nobody else', async () => {
     const owned = await runWithTenant(tenantA, () =>
       tickets.create({ title: 'A1 only' }, requesterA1),
     );
@@ -141,10 +144,67 @@ describe('TicketsService across tenants and requesters', () => {
       runWithTenant(tenantA, () => tickets.findOne(owned.id, requesterA2)),
     ).rejects.toBeInstanceOf(NotFoundException);
 
-    const asStaff = await runWithTenant(tenantA, () =>
-      tickets.findOne(owned.id, agentA),
+    // The agent gets that same 404 now: being staff is no longer the question,
+    // being the assignee is.
+    await expect(
+      runWithTenant(tenantA, () => tickets.findOne(owned.id, agentA)),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const asAdmin = await runWithTenant(tenantA, () =>
+      tickets.findOne(owned.id, adminA),
     );
-    expect(asStaff.id).toBe(owned.id);
+    expect(asAdmin.id).toBe(owned.id);
+  });
+
+  // The rule in one test: assignment is what grants and revokes sight of a
+  // ticket, and it does both.
+  it('shows an agent a ticket the moment it is assigned, and hides it again when it is not', async () => {
+    const ticket = await runWithTenant(tenantA, () =>
+      tickets.create({ title: 'to be worked' }, requesterA1),
+    );
+
+    await expect(
+      runWithTenant(tenantA, () => tickets.findOne(ticket.id, agentA)),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const assigned = await runWithTenant(tenantA, () =>
+      tickets.assign(
+        ticket.id,
+        { version: ticket.version, assigneeId: agentA.id },
+        adminA,
+      ),
+    );
+
+    const seen = await runWithTenant(tenantA, () =>
+      tickets.findOne(ticket.id, agentA),
+    );
+    expect(seen.id).toBe(ticket.id);
+
+    await runWithTenant(tenantA, () =>
+      tickets.assign(
+        ticket.id,
+        { version: assigned.version, assigneeId: null },
+        adminA,
+      ),
+    );
+
+    await expect(
+      runWithTenant(tenantA, () => tickets.findOne(ticket.id, agentA)),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  // Agents cannot open tickets any more, but rows they opened under the old
+  // rule exist in every database that predates this change. The scope keeps
+  // both arms so that their own authors do not lose them.
+  it('keeps a ticket visible to the agent who opened it', async () => {
+    const own = await runWithTenant(tenantA, () =>
+      tickets.create({ title: 'opened by the agent' }, agentA),
+    );
+
+    const seen = await runWithTenant(tenantA, () =>
+      tickets.findOne(own.id, agentA),
+    );
+    expect(seen.id).toBe(own.id);
   });
 
   it('lists only the caller own tickets for a requester', async () => {
@@ -155,15 +215,19 @@ describe('TicketsService across tenants and requesters', () => {
       tickets.findAll({ page: 1, perPage: 100 }, requesterA2),
     );
     const all = await runWithTenant(tenantA, () =>
-      tickets.findAll({ page: 1, perPage: 100 }, agentA),
+      tickets.findAll({ page: 1, perPage: 100 }, adminA),
     );
 
     expect(mine.meta.total).toBeGreaterThan(0);
     expect(theirs.meta.total).toBe(0);
-    expect(all.meta.total).toBe(mine.meta.total);
+    // The admin is the only company-wide view left, so it is the one that can
+    // see more than the author of a ticket does.
+    expect(all.meta.total).toBeGreaterThanOrEqual(mine.meta.total);
     // The total is filtered too, not just the page: a count that included
     // invisible rows would announce that they exist.
-    expect(all.data.every((t) => t.requester.id === requesterA1.id)).toBe(true);
+    expect(mine.data.every((t) => t.requester.id === requesterA1.id)).toBe(
+      true,
+    );
   });
 
   it('refuses to assign a ticket to a user of another company', async () => {
@@ -179,7 +243,7 @@ describe('TicketsService across tenants and requesters', () => {
         tickets.assign(
           owned.id,
           { version: owned.version, assigneeId: requesterB.id },
-          agentA,
+          adminA,
         ),
       ),
     ).rejects.toBeInstanceOf(NotFoundException);

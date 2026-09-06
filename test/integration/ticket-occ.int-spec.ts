@@ -37,6 +37,7 @@ describe('ticket optimistic concurrency', () => {
   const domains: string[] = [];
   let tenantId: string;
   let agent: AuthenticatedUser;
+  let admin: AuthenticatedUser;
   let requester: AuthenticatedUser;
 
   beforeAll(async () => {
@@ -83,6 +84,13 @@ describe('ticket optimistic concurrency', () => {
           role: UserRole.REQUESTER,
         }),
       });
+      const adminRow = await prisma.user.create({
+        data: tenantScoped({
+          email: 'admin.example',
+          passwordHash: 'x',
+          role: UserRole.ADMIN,
+        }),
+      });
 
       agent = {
         id: agentRow.id,
@@ -96,6 +104,12 @@ describe('ticket optimistic concurrency', () => {
         email: requesterRow.email,
         role: UserRole.REQUESTER,
       };
+      admin = {
+        id: adminRow.id,
+        tenantId,
+        email: adminRow.email,
+        role: UserRole.ADMIN,
+      };
     });
   });
 
@@ -106,8 +120,27 @@ describe('ticket optimistic concurrency', () => {
     await mod.close();
   });
 
-  const open = (title: string) =>
-    runWithTenant(tenantId, () => tickets.create({ title }, requester));
+  /**
+   * A ticket the agent can actually contend for.
+   *
+   * The requester opens it and the admin hands it over, because a ticket
+   * nobody is assigned to is invisible to an agent — `load()` inside
+   * `mutate()` would answer 404 long before the version check this file is
+   * about. The scenario is unchanged, it just takes one more step to set up.
+   */
+  const open = async (title: string) => {
+    const ticket = await runWithTenant(tenantId, () =>
+      tickets.create({ title }, requester),
+    );
+
+    return runWithTenant(tenantId, () =>
+      tickets.assign(
+        ticket.id,
+        { version: ticket.version, assigneeId: agent.id },
+        admin,
+      ),
+    );
+  };
 
   it('lets exactly one of two writers at the same version through', async () => {
     const ticket = await open('contended');
@@ -164,7 +197,10 @@ describe('ticket optimistic concurrency', () => {
           agent,
         ),
       ),
-    ).rejects.toThrow(/version 2/);
+      // Derived rather than hard-coded: the ticket reaches this test already
+      // assigned, so its opening version is not 1 and a literal here would be
+      // a test that only passes by coincidence.
+    ).rejects.toThrow(new RegExp(`version ${ticket.version + 1}`));
   });
 
   it('rejects a stale writer without touching the row', async () => {

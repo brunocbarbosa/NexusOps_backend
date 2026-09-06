@@ -69,15 +69,17 @@ export class QueryTicketsDto {
   @IsUUID()
   assigneeId?: string;
 
-  // A REQUESTER may send this and it will be overridden by their own id: the
-  // visibility scope is applied after every filter, on purpose. See
-  // `TicketsService.findAll`.
+  // Anybody may send this, and it is intersected with what the caller is
+  // allowed to see rather than overriding it: asking about somebody else's
+  // tickets answers an empty page. See `TicketsService.visibleTo`.
   @IsOptional()
   @IsUUID()
   requesterId?: string;
 
-  // The agent's queue. Contradicting it with `assigneeId` is a 400 rather than
-  // a silent winner, because either interpretation would be a guess.
+  // The unassigned queue, which only an ADMIN has: for anybody else it
+  // intersects with their own scope and leaves the tickets they opened that
+  // nobody has picked up. Contradicting it with `assigneeId` is a 400 rather
+  // than a silent winner, because either interpretation would be a guess.
   @IsOptional()
   @IsBoolean()
   @Transform(asOptionalBoolean)

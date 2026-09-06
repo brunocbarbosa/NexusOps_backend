@@ -62,12 +62,27 @@ export type TicketEvent = {
    * Who opened the ticket.
    *
    * Carried for the notification gateway rather than for the trail, which
-   * never reads it: staff hear about every ticket in the company, and the
-   * requester is the one person outside staff who should hear about this one.
-   * Looking it up in the gateway instead would mean a database read per event,
-   * on a listener that has no request scope to read it in.
+   * never reads it: the company's admins hear about every ticket, and the
+   * requester is one of the two people outside that room who should hear about
+   * this one. Looking it up in the gateway instead would mean a database read
+   * per event, on a listener that has no request scope to read it in.
    */
   requesterId: string;
+  /**
+   * Who is working it — the other one.
+   *
+   * Plural because a reassignment concerns two people, the agent it reached and
+   * the agent it left, and empty while nobody is assigned. Carried for the same
+   * reason `requesterId` is: an agent hears about the tickets assigned to it
+   * and about nothing else, and the gateway has no scope in which to look that
+   * up.
+   *
+   * **Required rather than optional, and that is the point.** An emit site that
+   * forgot this field would silently stop notifying the one person actually
+   * working the ticket — no error, no failing HTTP test, just an agent whose
+   * screen never moves. Required means the compiler names every site.
+   */
+  assigneeIds: string[];
   entityType: AuditEntity;
   entityId: string;
   action: AuditAction;

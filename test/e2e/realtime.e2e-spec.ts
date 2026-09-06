@@ -52,6 +52,7 @@ describe('Realtime (e2e)', () => {
 
   let operator: AuthBody;
   let adminA: AuthBody;
+  let domainA: string;
   let agentA: AuthBody;
   let requesterA: AuthBody;
   let otherRequesterA: AuthBody;
@@ -141,6 +142,7 @@ describe('Realtime (e2e)', () => {
 
     const a = await newTenant('a');
     adminA = a.admin;
+    domainA = a.domain;
     agentA = await addUser(adminA, a.domain, 'agent@a.example', UserRole.AGENT);
     requesterA = await addUser(
       adminA,
@@ -208,8 +210,9 @@ describe('Realtime (e2e)', () => {
   });
 
   describe('who hears about a ticket', () => {
-    it('tells staff and the requester, and nobody else', async () => {
-      const [staff, mine, theirs, elsewhere] = await Promise.all([
+    it('tells the admins and the requester, and nobody else', async () => {
+      const [boss, unassigned, mine, theirs, elsewhere] = await Promise.all([
+        connect(adminA.accessToken),
         connect(agentA.accessToken),
         connect(requesterA.accessToken),
         connect(otherRequesterA.accessToken),
@@ -217,7 +220,8 @@ describe('Realtime (e2e)', () => {
       ]);
 
       const heard = Promise.all([
-        collect<TicketMessage>(staff, 'ticket.changed'),
+        collect<TicketMessage>(boss, 'ticket.changed'),
+        collect<TicketMessage>(unassigned, 'ticket.changed'),
         collect<TicketMessage>(mine, 'ticket.changed'),
         collect<TicketMessage>(theirs, 'ticket.changed'),
         collect<TicketMessage>(elsewhere, 'ticket.changed'),
@@ -230,14 +234,81 @@ describe('Realtime (e2e)', () => {
           .expect(201),
       );
 
-      const [byStaff, byMine, byTheirs, byElsewhere] = await heard;
+      const [byBoss, byUnassigned, byMine, byTheirs, byElsewhere] = await heard;
 
-      expect(byStaff.map((m) => m.ticketId)).toContain(ticket.id);
+      expect(byBoss.map((m) => m.ticketId)).toContain(ticket.id);
       expect(byMine.map((m) => m.ticketId)).toContain(ticket.id);
-      // The two that matter: another requester in the same company, and a
-      // requester in another company entirely.
+      // The three that matter, and the first is the new one: an agent nobody
+      // has given this ticket to. It used to hear every ticket in the company
+      // here, and no HTTP test would ever have said so.
+      expect(byUnassigned).toHaveLength(0);
       expect(byTheirs).toHaveLength(0);
       expect(byElsewhere).toHaveLength(0);
+    });
+
+    it('starts telling an agent about a ticket the moment it is assigned', async () => {
+      const socket = await connect(agentA.accessToken);
+
+      const opened = bodyOf<TicketBody>(
+        await as(requesterA)
+          .post('/tickets')
+          .send({ title: 'handed over on the socket' })
+          .expect(201),
+      );
+
+      const heard = collect<TicketMessage>(socket, 'ticket.changed');
+
+      const assigned = bodyOf<TicketBody>(
+        await as(adminA)
+          .patch(`/tickets/${opened.id}/assignee`)
+          .send({ version: opened.version, assigneeId: agentA.user.id })
+          .expect(200),
+      );
+      await as(agentA)
+        .patch(`/tickets/${assigned.id}/status`)
+        .send({ version: assigned.version, status: TicketStatus.IN_PROGRESS })
+        .expect(200);
+
+      const messages = await heard;
+      expect(messages.map((m) => m.action)).toEqual(
+        expect.arrayContaining(['assigned', 'status_changed']),
+      );
+    });
+
+    it('tells an agent a ticket was taken away from it', async () => {
+      const second = await addUser(
+        adminA,
+        domainA,
+        'second-agent@a.example',
+        UserRole.AGENT,
+      );
+      const socket = await connect(agentA.accessToken);
+
+      const opened = bodyOf<TicketBody>(
+        await as(requesterA)
+          .post('/tickets')
+          .send({ title: 'taken away' })
+          .expect(201),
+      );
+      const mine = bodyOf<TicketBody>(
+        await as(adminA)
+          .patch(`/tickets/${opened.id}/assignee`)
+          .send({ version: opened.version, assigneeId: agentA.user.id })
+          .expect(200),
+      );
+
+      const heard = collect<TicketMessage>(socket, 'ticket.changed');
+
+      await as(adminA)
+        .patch(`/tickets/${mine.id}/assignee`)
+        .send({ version: mine.version, assigneeId: second.user.id })
+        .expect(200);
+
+      // The deliberate exception: this event describes a ticket the agent can
+      // no longer read over HTTP, and it exists so its queue drops the row.
+      const messages = await heard;
+      expect(messages.map((m) => m.action)).toContain('assigned');
+      await as(agentA).get(`/tickets/${mine.id}`).expect(404);
     });
 
     it('keeps the internal note away from the requester', async () => {
@@ -246,11 +317,18 @@ describe('Realtime (e2e)', () => {
         connect(requesterA.accessToken),
       ]);
 
-      const ticket = bodyOf<TicketBody>(
+      const opened = bodyOf<TicketBody>(
         await as(requesterA)
           .post('/tickets')
           .send({ title: 'with a note' })
           .expect(201),
+      );
+      // The agent has to be working the ticket before it can write its note.
+      const ticket = bodyOf<TicketBody>(
+        await as(adminA)
+          .patch(`/tickets/${opened.id}/assignee`)
+          .send({ version: opened.version, assigneeId: agentA.user.id })
+          .expect(200),
       );
 
       const heard = Promise.all([
@@ -273,11 +351,17 @@ describe('Realtime (e2e)', () => {
 
     it('carries the action of a status change', async () => {
       const staff = await connect(agentA.accessToken);
-      const ticket = bodyOf<TicketBody>(
+      const opened = bodyOf<TicketBody>(
         await as(requesterA)
           .post('/tickets')
           .send({ title: 'status watch' })
           .expect(201),
+      );
+      const ticket = bodyOf<TicketBody>(
+        await as(adminA)
+          .patch(`/tickets/${opened.id}/assignee`)
+          .send({ version: opened.version, assigneeId: agentA.user.id })
+          .expect(200),
       );
 
       const heard = collect<TicketMessage>(staff, 'ticket.changed');

@@ -43,6 +43,7 @@ describe('ticket report queue', () => {
   let tenantA: string;
   let tenantB: string;
   let agentA: AuthenticatedUser;
+  let adminA: AuthenticatedUser;
   let requesterA: AuthenticatedUser;
   let otherRequesterA: AuthenticatedUser;
   let requesterB: AuthenticatedUser;
@@ -72,8 +73,9 @@ describe('ticket report queue', () => {
       const agent = await make(`agent@${label}.example`, UserRole.AGENT);
       const one = await make(`one@${label}.example`, UserRole.REQUESTER);
       const two = await make(`two@${label}.example`, UserRole.REQUESTER);
+      const boss = await make(`admin@${label}.example`, UserRole.ADMIN);
 
-      return { tenantId: tenant.id, agent, one, two };
+      return { tenantId: tenant.id, agent, one, two, boss };
     });
   };
 
@@ -124,18 +126,32 @@ describe('ticket report queue', () => {
     tenantA = a.tenantId;
     tenantB = b.tenantId;
     agentA = asUser(a.agent, tenantA, UserRole.AGENT);
+    adminA = asUser(a.boss, tenantA, UserRole.ADMIN);
     requesterA = asUser(a.one, tenantA, UserRole.REQUESTER);
     otherRequesterA = asUser(a.two, tenantA, UserRole.REQUESTER);
     requesterB = asUser(b.one, tenantB, UserRole.REQUESTER);
 
     // Two tickets for requesterA, one for the other requester, one in the other
     // company. Every leak this suite can catch needs all four.
+    //
+    // One of requesterA's is then handed to the agent, because an agent's
+    // export is scoped to what it is working: without an assignment the agent
+    // would have nothing to export and the rule would be untested rather than
+    // proved.
     await runWithTenant(tenantA, async () => {
       await tickets.create(
         { title: 'A-one urgent', priority: TicketPriority.URGENT },
         requesterA,
       );
-      await tickets.create({ title: 'A-one normal' }, requesterA);
+      const normal = await tickets.create(
+        { title: 'A-one normal' },
+        requesterA,
+      );
+      await tickets.assign(
+        normal.id,
+        { version: normal.version, assigneeId: agentA.id },
+        adminA,
+      );
     });
     await runWithTenant(tenantA, () =>
       tickets.create({ title: 'A-two private' }, otherRequesterA),
@@ -160,7 +176,7 @@ describe('ticket report queue', () => {
 
   it('answers immediately and finishes later', async () => {
     const requested = await runWithTenant(tenantA, () =>
-      reports.requestTicketReport({}, agentA),
+      reports.requestTicketReport({}, adminA),
     );
 
     // What the 202 hands back: a request, not a report.
@@ -175,13 +191,28 @@ describe('ticket report queue', () => {
 
   it('never puts another company tickets in the file', async () => {
     const requested = await runWithTenant(tenantA, () =>
+      reports.requestTicketReport({}, adminA),
+    );
+    const settled = await settle(tenantA, requested.id);
+
+    // An admin of company A sees all three of A's tickets and none of B's.
+    expect(settled.rowCount).toBe(3);
+    expect(settled.content).not.toContain('B-one elsewhere');
+  });
+
+  // The strongest placement of the visibility rule there is: it proves the
+  // scope survives the trip through Redis into a worker that has no request
+  // context to inherit one from.
+  it('gives an agent only the tickets assigned to them', async () => {
+    const requested = await runWithTenant(tenantA, () =>
       reports.requestTicketReport({}, agentA),
     );
     const settled = await settle(tenantA, requested.id);
 
-    // An agent of company A sees all three of A's tickets and none of B's.
-    expect(settled.rowCount).toBe(3);
-    expect(settled.content).not.toContain('B-one elsewhere');
+    expect(settled.rowCount).toBe(1);
+    expect(settled.content).toContain('A-one normal');
+    expect(settled.content).not.toContain('A-one urgent');
+    expect(settled.content).not.toContain('A-two private');
   });
 
   it('gives a requester only their own rows', async () => {
@@ -199,7 +230,7 @@ describe('ticket report queue', () => {
 
   it('applies the filters it was asked for', async () => {
     const requested = await runWithTenant(tenantA, () =>
-      reports.requestTicketReport({ priority: TicketPriority.URGENT }, agentA),
+      reports.requestTicketReport({ priority: TicketPriority.URGENT }, adminA),
     );
     const settled = await settle(tenantA, requested.id);
 

@@ -18,6 +18,12 @@
 > As seções das fases concluídas ganham uma nota **Como saiu** ao final, com os desvios em relação
 > ao que estava planejado e os defeitos encontrados durante a execução.
 
+> **Nota de 2026-09-05.** A visibilidade descrita aqui mudou depois desta fase: um `AGENT` deixou de
+> ver todos os chamados da empresa e passou a ver os atribuídos a ele, atribuir virou rota exclusiva
+> do `ADMIN`, e `POST /tickets` deixou de aceitar um agente. Este arquivo é o registro do que foi
+> executado naquela fase e **não** foi reescrito — o estado corrente está em
+> [`visibilidade/`](../visibilidade/) e em [`important/HELPDESK.md`](../important/HELPDESK.md).
+
 ## Context
 
 O NexusOps tem hoje a fundação pronta — tenancy medido, autenticação, `users`, `platform` — e
