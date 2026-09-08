@@ -11,6 +11,8 @@
 >
 > - [`GUIA_VARIAVEIS_AMBIENTE.md`](./GUIA_VARIAVEIS_AMBIENTE.md) — o mesmo tratamento didático, para
 >   as variáveis de ambiente: o que cada uma faz e quem a lê.
+> - [`GUIA_RLS.md`](./GUIA_RLS.md) — o mesmo tratamento didático, para o Row-Level Security: o que é,
+>   o que já foi decidido e o que falta construir.
 > - [`important/`](../important/) — as referências profundas: o comportamento medido da extensão de
 >   tenancy e as notas de RLS.
 > - [`../../CLAUDE.md`](../../CLAUDE.md) — a referência curta e operacional, para consulta rápida.

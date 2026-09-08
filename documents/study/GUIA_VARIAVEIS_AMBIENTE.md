@@ -10,6 +10,8 @@
 > Documentos vizinhos, com propósitos diferentes:
 >
 > - [`GUIA_CI_CD.md`](./GUIA_CI_CD.md) — o mesmo tratamento didático, para a esteira de CI/CD.
+> - [`GUIA_RLS.md`](./GUIA_RLS.md) — o mesmo tratamento didático, para o Row-Level Security, que é de
+>   onde vêm `DATABASE_URL_APP` e `POSTGRES_APP_PASSWORD`.
 > - [`../important/USERS.md`](../important/USERS.md) — o porquê medido das decisões de autenticação,
 >   incluindo por que existem duas chaves JWT.
 > - [`../../CLAUDE.md`](../../CLAUDE.md) — a referência curta e operacional.

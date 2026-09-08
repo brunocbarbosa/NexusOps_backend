@@ -7,6 +7,9 @@
 > sites against this design and measuring what it would do to them, and all four changed something,
 > so Part II describes the design they produced rather than the one this document started with.
 
+If Row-Level Security itself is new to you, [`study/GUIA_RLS.md`](./study/GUIA_RLS.md) teaches it
+from zero, in Portuguese, and covers this design in plain language before you read it here.
+
 The companion document, `important/RLS_NOTES.md`, answers "what did we measure and what remains".
 This one answers "what shape does the implementation take, and what does it cost". Read that one
 first: everything below assumes its two traps, and none of them are re-argued here.

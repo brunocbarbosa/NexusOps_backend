@@ -5,6 +5,9 @@
 > because the measurements below cost real debugging time — losing them would mean paying for them
 > again.
 >
+> Never seen RLS before? [`../study/GUIA_RLS.md`](../study/GUIA_RLS.md) teaches it from zero, in
+> Portuguese, and is the gentler way in.
+>
 > **Read [`../RLS_DESIGN.md`](../RLS_DESIGN.md) before building any of it.** This document says why
 > the layer exists and what it must survive; that one says what shape it takes, and every decision
 > in it is settled. The four steps below are still the right four, but each has detail there that

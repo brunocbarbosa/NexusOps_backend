@@ -31,6 +31,7 @@ Other documents, by purpose:
 | `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime         |
 | `documents/visibilidade/`                    | working on who sees which ticket, or on assignment               |
 | `documents/RLS_DESIGN.md`                    | building Row-Level Security — the settled design, roles to tests |
+| `documents/study/GUIA_RLS.md`                | you want Row-Level Security explained from first principles      |
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles         |
 | `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one         |
 | `documents/important/`                       | the deep references below — kept together so they stay findable  |
