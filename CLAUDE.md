@@ -30,7 +30,6 @@ Other documents, by purpose:
 | `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec           |
 | `documents/MAIN.md`                          | you need the product scope the backend serves                    |
 | `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime         |
-| `documents/visibilidade/`                    | working on who sees which ticket, or on assignment               |
 | `documents/RLS_DESIGN.md`                    | building Row-Level Security — the settled design, roles to tests |
 | `documents/study/GUIA_RLS.md`                | you want Row-Level Security explained from first principles      |
 | `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles         |

@@ -22,7 +22,7 @@
 > ver todos os chamados da empresa e passou a ver os atribuídos a ele, atribuir virou rota exclusiva
 > do `ADMIN`, e `POST /tickets` deixou de aceitar um agente. Este arquivo é o registro do que foi
 > executado naquela fase e **não** foi reescrito — o estado corrente está em
-> [`visibilidade/`](../visibilidade/) e em [`important/HELPDESK.md`](../important/HELPDESK.md).
+> [`important/HELPDESK.md`](../important/HELPDESK.md) e, resumido, no `CLAUDE.md`.
 
 ## Context
 
