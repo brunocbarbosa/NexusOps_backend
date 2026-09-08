@@ -1,20 +1,24 @@
 # Row-Level Security — implementation design
 
-> **Status: design, not implemented.** This is the plan for the second isolation layer that
-> [`important/RLS_NOTES.md`](./important/RLS_NOTES.md) has been holding measurements for. **Every
-> decision is settled**; Part IV has all six with their reasoning. **It is built.** The role, the
-> policies, the grants, the runtime and the suites are in the repository, and the application
-> connects as `nexusops_app` — measured: `rolsuper` and `rolbypassrls` both false, and a query
-> outside a scope returns zero rows. Part VI now carries numbers instead of a promise. Four of the six — #0, #1, #2 and #3 — came from reading the call
-> sites against this design and measuring what it would do to them, and all four changed something,
-> so Part II describes the design they produced rather than the one this document started with.
+> **Status: built.** The role, the policies, the grants, the runtime and the suites are all in the
+> repository, and the application connects as `nexusops_app` — measured: `rolsuper` and
+> `rolbypassrls` both false, and a query made outside a scope returns zero rows. Part VI carries
+> numbers rather than a promise.
+>
+> This is the second isolation layer that
+> [`important/RLS_NOTES.md`](./important/RLS_NOTES.md) had been holding measurements for. **Every
+> decision is settled**; Part IV has all six with their reasoning. Four of them — #0, #1, #2 and #3 —
+> came from reading the call sites against this design and measuring what it would do to them, and
+> all four changed something. So Part II describes the design they produced rather than the one this
+> document started with, and the two sections it gained during implementation (`attempt()`, and the
+> write that must outlive a failing request) describe things nothing in the plan predicted.
 
 If Row-Level Security itself is new to you, [`study/GUIA_RLS.md`](./study/GUIA_RLS.md) teaches it
 from zero, in Portuguese, and covers this design in plain language before you read it here.
 
 The companion document, `important/RLS_NOTES.md`, answers "what did we measure and what remains".
 This one answers "what shape does the implementation take, and what does it cost". Read that one
-first: everything below assumes its two traps, and none of them are re-argued here.
+first: everything below assumes its three traps, and none of them are re-argued here.
 
 ---
 
@@ -52,8 +56,8 @@ by the extension exactly like the others.
 | `tenants`            | no     | it _is_ the tenant rather than being scoped by one |
 | `_prisma_migrations` | no     | not application data                               |
 
-Whoever implements this should fix the list in `RLS_NOTES.md` in the same branch, or the stale
-count will be believed again.
+`RLS_NOTES.md` was corrected in the same branch. The count is kept here because it is the reason
+seven policies exist rather than five, and because a model added later has to join the list.
 
 ---
 
@@ -66,11 +70,11 @@ count will be believed again.
 | `nexusops`     | container superuser, owns the tables              | `prisma migrate`, `prisma studio`, `resetDatabase` in the suites |
 | `nexusops_app` | `NOSUPERUSER NOBYPASSRLS`, not an owner, DML only | the running application                                          |
 
-`DATABASE_URL` keeps pointing at `nexusops` and keeps being what migrations use.
-`DATABASE_URL_APP` — which `.env.example` already reserves — becomes what `PrismaModule` injects.
+`DATABASE_URL` points at `nexusops` and is what migrations use. `DATABASE_URL_APP` is what
+`PrismaModule` injects.
 
-Two consequences for `src/config/env.validation.ts`: `DATABASE_URL_APP` becomes required, and the
-two URLs must be refused when equal. That second check is the same shape as the one already
+Two consequences for `src/config/env.validation.ts`: `DATABASE_URL_APP` is required, and the two
+URLs are refused when equal. That second check is the same shape as the one already
 guarding the two JWT keys, and for the same reason — a configuration where they match is not a
 misconfiguration that announces itself, it is RLS that is quietly inert.
 
@@ -83,8 +87,8 @@ serves local runs and CI.
 
 It runs once, when the container is created. That fits the ephemeral test stack perfectly, since it
 is created fresh on every run, and it fits CI for free. The cost lands on development: **an existing
-dev container only gets the role after `npm run infra:reset`**, which destroys local data. That has
-to be in the README, not only here.
+dev container only gets the role after `npm run infra:reset`**, which destroys local data. That is
+in the README too, where somebody upgrading a clone will actually read it.
 
 Alternatives considered and rejected: putting `CREATE ROLE` in a Prisma migration would write the
 role's password into committed SQL and would use a migration to create a cluster-level object; a
@@ -657,12 +661,24 @@ deliberately sized pool, and measurement.
 The middle row is the one worth looking at: the design as first drafted predicted a peak of two
 there, and settled decision #0 removed it by making a nested scope reuse the open transaction.
 
-**What the configured pool sustains: ten.** Twenty simultaneous scopes peaked at ten connections,
-which is `pg`'s default `max`. The eleventh request does not fail — it waits for a connection, and
-gives up after `maxWait` (5s) if none frees. So the pool size is now a throughput ceiling on
-concurrent _requests_ rather than on concurrent queries, and `max` on `PrismaPg` should be set
-deliberately rather than left at the driver default. It still is at the default today; that is the
-next thing to change, and it is a configuration decision rather than a design one.
+**What the pool sustains is now a number somebody chose.** Twenty simultaneous scopes settle at
+exactly the configured `max` — measured at ten against `pg`'s default, before the setting existed.
+Request number `max + 1` does not fail: it waits for a connection and gives up after the scope's
+`maxWait` (5s) if none frees. So the pool size is a ceiling on concurrent _requests_ rather than on
+concurrent queries.
+
+`DATABASE_POOL_MAX` is therefore a **required** environment variable with no default, and
+`createPrismaClient` takes it as a required argument rather than an option. The default was the
+thing to avoid: a ceiling inherited from a driver is a ceiling nobody knows. `.env.test` sets 25,
+sized from the suites rather than guessed — `ticket-numbering.int-spec.ts` opens twenty scopes at
+once and each holds a connection while it queues on the ticket-counter row lock, which is the
+contention `TicketsService.create()` gained in Part II.
+
+What remains unset, and is worth naming rather than leaving to be discovered: PostgreSQL's
+`idle_in_transaction_session_timeout` is still `0` here. A request that stalls between statements —
+waiting on bcrypt, or on something over the network — now leaves a transaction idle and holds its
+connection until the 15s scope timeout. Setting it on the application role would put a floor under
+that, and it is a configuration change rather than a design one.
 
 Lock hold times change with it, and one case is already known: `TicketsService.create()` takes the
 `ticket_counters` row lock and, under re-entrancy, keeps it until the request commits rather than

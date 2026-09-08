@@ -30,6 +30,7 @@ import {
 describe('the tenant scope, as the runtime opens it', () => {
   const prisma: ExtendedPrismaClient = createPrismaClient(
     process.env.DATABASE_URL as string,
+    5,
   );
   useScope(scopeFor(prisma));
 

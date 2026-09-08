@@ -421,8 +421,9 @@ The code and its comments are in English, and so is everything under `documents/
 - [x] Row-Level Security — seven policies, a low-privilege application role, and `set_config`
       inside an interactive transaction (setting the tenant outside one lands on a different pooled
       connection than the query, which under concurrency serves another tenant's rows)
-- [ ] Size the `pg` pool deliberately — a scope now holds a connection for the length of a request,
-      and the driver default measured as a ceiling of 10 concurrent requests
+- [x] Size the `pg` pool deliberately — a scope holds a connection for the length of a request, so
+      `DATABASE_POOL_MAX` is a required variable with no default: the ceiling is chosen, not
+      inherited from the driver
 - [ ] Object storage for report files and ticket attachments, replacing the `TEXT` column the CSV
       lives in today
 - [ ] Durable audit delivery — the trail is written after the response, so a failed insert leaves it

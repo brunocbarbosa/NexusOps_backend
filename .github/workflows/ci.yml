@@ -401,6 +401,7 @@ jobs:
             -e PORT=3000 \
             -e DATABASE_URL="$DATABASE_URL" \
             -e DATABASE_URL_APP="$DATABASE_URL_APP" \
+            -e DATABASE_POOL_MAX="$DATABASE_POOL_MAX" \
             -e JWT_SECRET="$JWT_SECRET" \
             -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
             -e JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \

@@ -65,6 +65,22 @@ export class EnvironmentVariables {
   })
   DATABASE_URL_APP: string;
 
+  // How many connections the application may hold at once. Under Row-Level
+  // Security a scope is a transaction and a transaction pins a connection for
+  // the length of the request that opened it, so this is the ceiling on
+  // concurrent requests, not on concurrent queries — request N+1 waits for a
+  // connection and gives up after the scope's 5s `maxWait`.
+  //
+  // Required, and with no default on purpose: `pg` has one (10), and a ceiling
+  // nobody chose is a ceiling nobody knows. The number that matters in
+  // production is this times the number of instances, against the server's
+  // `max_connections` — which is why the bound below is loose: only the
+  // deployment knows what is too many.
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  DATABASE_POOL_MAX: number;
+
   @IsString()
   @MinLength(16, {
     message:

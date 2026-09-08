@@ -32,7 +32,7 @@ describe('createPrismaClient (application client)', () => {
   let userA: string;
 
   beforeAll(async () => {
-    prisma = createPrismaClient(process.env.DATABASE_URL as string);
+    prisma = createPrismaClient(process.env.DATABASE_URL as string, 5);
     useScope(scopeFor(prisma));
 
     // Tenant is the one tenant-agnostic model, so seeding it needs the explicit

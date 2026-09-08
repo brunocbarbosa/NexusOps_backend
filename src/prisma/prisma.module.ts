@@ -47,7 +47,10 @@ import type { ExtendedPrismaClient } from './prisma.client';
         //
         // getOrThrow rather than get: validateEnv already guarantees the value,
         // and `get` would type it as possibly-undefined for no reason.
-        createPrismaClient(config.getOrThrow<string>('DATABASE_URL_APP')),
+        createPrismaClient(
+          config.getOrThrow<string>('DATABASE_URL_APP'),
+          config.getOrThrow<number>('DATABASE_POOL_MAX'),
+        ),
     },
     TenantScopeService,
   ],

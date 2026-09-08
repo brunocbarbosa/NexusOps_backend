@@ -21,9 +21,16 @@ import { currentTransaction } from '../tenancy/tenant-store';
  * extension, and `test/integration/rls.int-spec.ts`, which uses one to show what
  * the database does without either.
  */
-export function createPrismaClient(connectionString: string) {
+export function createPrismaClient(connectionString: string, poolMax: number) {
   // Pool settings live on the adapter in v7, not on PrismaClient.
-  const adapter = new PrismaPg({ connectionString });
+  //
+  // `max` is a required argument rather than an option with a default, because
+  // the default is the thing to avoid: a scope holds a connection for the length
+  // of a request now, so the pool size is a ceiling on concurrent *requests*
+  // rather than on concurrent queries. Leaving it implicit would mean the
+  // ceiling was chosen by `pg` and nobody knew the number. Every construction
+  // site has to say what it is.
+  const adapter = new PrismaPg({ connectionString, max: poolMax });
   const base = new PrismaClient({ adapter }).$extends(tenantIsolationExtension);
   return withOpenTransaction(base);
 }

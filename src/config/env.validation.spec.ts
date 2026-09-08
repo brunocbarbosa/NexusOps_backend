@@ -6,6 +6,7 @@ describe('validateEnv', () => {
     PORT: '3000',
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/db?schema=public',
     DATABASE_URL_APP: 'postgresql://app:pass@localhost:5432/db?schema=public',
+    DATABASE_POOL_MAX: '10',
     JWT_SECRET: 'a-secret-long-enough-to-pass',
     JWT_EXPIRES_IN: '15m',
     JWT_REFRESH_SECRET: 'a-different-secret-long-enough',
@@ -75,6 +76,7 @@ describe('validateEnv', () => {
   it.each([
     ['DATABASE_URL', 'mysql://user:pass@localhost:3306/db'],
     ['DATABASE_URL_APP', 'mysql://app:pass@localhost:3306/db'],
+    ['DATABASE_POOL_MAX', '0'],
     ['JWT_EXPIRES_IN', '15 minutes'],
     ['JWT_REFRESH_EXPIRES_IN', 'forever'],
     ['NODE_ENV', 'produciton'],
