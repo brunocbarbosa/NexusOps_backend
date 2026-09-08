@@ -74,9 +74,9 @@ them is not by itself a leak.
 
 ```mermaid
 flowchart TD
-    A["HTTP request<br/>JWT carries tenant_id"] --> B["AsyncLocalStorage<br/>runWithTenant(tenantId, fn)"]
+    A["HTTP request<br/>JWT carries tenant_id"] --> B["TenantScopeService<br/>AsyncLocalStorage + a transaction<br/>that sets app.tenant_id"]
     B --> C["Prisma Client Extension<br/>$allOperations on $allModels"]
-    C --> D["PostgreSQL<br/>composite FKs + RLS (planned)"]
+    C --> D["PostgreSQL<br/>composite FKs + Row-Level Security"]
 
     E["BullMQ worker<br/>WebSocket handler"] -.->|"no HTTP request:<br/>tenant must travel<br/>in the job payload"| B
 
@@ -92,9 +92,15 @@ prevent. What exists instead:
 
 ```ts
 requireTenantId(); // string, or throws TenantContextMissingError — never nullable
-runWithTenant(id, fn); // establishes the scope; always async, because PrismaPromise is lazy
-runWithoutTenant(fn); // the explicit, greppable escape hatch — used by the login path only
+scope.runWithTenant(id, fn); // opens the scope; always async, because PrismaPromise is lazy
+scope.runWithoutTenant(fn); // the explicit, greppable escape hatch — login and the operator
 ```
+
+Opening a scope is a method on an injected `TenantScopeService` rather than a free function,
+because a scope is also a **database transaction**: it sets `app.tenant_id` on one connection, and
+a proxy over the Prisma client keeps every query — raw SQL included — on that connection. A nested
+scope reuses the open transaction and restores the enclosing tenant on the way out, so a platform
+route holds one pooled connection rather than two.
 
 **Layer 2 — the Prisma extension.** [`src/tenancy/tenant-extension.ts`](src/tenancy/tenant-extension.ts)
 hooks `$allOperations` on `$allModels`, so "I forgot to scope this query" is not a reachable
@@ -107,13 +113,22 @@ than papered over: nested writes and `include` are not intercepted by the query 
 child relation uses a **composite foreign key** against `@@unique([tenantId, id])` on its parent.
 Postgres itself then rejects a cross-tenant reference, and `tenantId` disappears from the nested
 write input — making the wrong tenant _inexpressible_ through the API rather than merely
-disallowed. Row-Level Security is the planned backstop for raw SQL, which never reaches the
-extension at all.
+disallowed.
+
+And **Row-Level Security is on**, which is what covers raw SQL — it never reaches the extension at
+all. Seven policies, and an application role that cannot bypass them: the app connects as
+`nexusops_app` (`NOSUPERUSER NOBYPASSRLS`, owning nothing) while migrations keep the owner. The
+consequence is worth stating plainly, because it is what the runtime above exists to satisfy: **a
+query made outside a scope returns zero rows**, not another tenant's. Fail-closed by construction.
+It is explained from first principles in
+[`documents/study/GUIA_RLS.md`](documents/study/GUIA_RLS.md), designed in
+[`documents/RLS_DESIGN.md`](documents/RLS_DESIGN.md), and measured in
+[`documents/important/RLS_NOTES.md`](documents/important/RLS_NOTES.md).
 
 > **The single most likely place for a tenant leak** is that **BullMQ workers and WebSocket
 > handlers have no HTTP request**, so the `AsyncLocalStorage` context is empty there. Tenant
-> identity must be carried explicitly in the job payload and re-established with `runWithTenant`
-> before any query runs. The integration suite has a dedicated `background worker` block asserting
+> identity must be carried explicitly in the job payload and re-established with
+> `scope.runWithTenant` before any query runs — one scope per unit of work, not one for the job. The integration suite has a dedicated `background worker` block asserting
 > exactly this.
 
 The extension's measured behaviour against Prisma 7.10.0 — five findings the design depends on — is
@@ -403,9 +418,11 @@ The code and its comments are in English, and so is everything under `documents/
 - [x] Audit module listening on domain events
 - [x] BullMQ queues and workers, with tenant context re-established from the job payload
 - [x] WebSockets gateway for job-completion notifications
-- [ ] Row-Level Security — policies, a low-privilege application role, and `set_config` inside an
-      interactive transaction (setting the tenant outside one lands on a different pooled
+- [x] Row-Level Security — seven policies, a low-privilege application role, and `set_config`
+      inside an interactive transaction (setting the tenant outside one lands on a different pooled
       connection than the query, which under concurrency serves another tenant's rows)
+- [ ] Size the `pg` pool deliberately — a scope now holds a connection for the length of a request,
+      and the driver default measured as a ceiling of 10 concurrent requests
 - [ ] Object storage for report files and ticket attachments, replacing the `TEXT` column the CSV
       lives in today
 - [ ] Durable audit delivery — the trail is written after the response, so a failed insert leaves it
