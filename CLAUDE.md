@@ -24,15 +24,16 @@ from the original architecture that is still missing.
 
 Other documents, by purpose:
 
-| File                                         | Read it when                                                    |
-| -------------------------------------------- | --------------------------------------------------------------- |
-| `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec          |
-| `documents/MAIN.md`                          | you need the product scope the backend serves                   |
-| `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime        |
-| `documents/visibilidade/`                    | working on who sees which ticket, or on assignment              |
-| `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
-| `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
-| `documents/important/`                       | the deep references below — kept together so they stay findable |
+| File                                         | Read it when                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec           |
+| `documents/MAIN.md`                          | you need the product scope the backend serves                    |
+| `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime         |
+| `documents/visibilidade/`                    | working on who sees which ticket, or on assignment               |
+| `documents/RLS_DESIGN.md`                    | building Row-Level Security — the settled design, roles to tests |
+| `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles         |
+| `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one         |
+| `documents/important/`                       | the deep references below — kept together so they stay findable  |
 
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the tenancy layer, in two parts: the contract a
@@ -51,7 +52,8 @@ payloads captured from the running application, and the measured behaviour behin
 before editing `src/tickets/`, `src/comments/`, `src/audit/`, `src/reports/`, `src/realtime/` or
 `src/events/`) and `RLS_NOTES.md` (Row-Level
 Security, **not implemented yet**: the four steps that remain and how to check whether it is
-actually enforcing anything, plus the two traps measured here). They live together so that detail nobody needs today
+actually enforcing anything, plus the three traps measured here; it sends you to
+`documents/RLS_DESIGN.md` for the shape the implementation takes, where every decision is settled). They live together so that detail nobody needs today
 does not get lost.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
@@ -267,12 +269,16 @@ is written against: the exported API, how each Prisma operation is treated, and 
 requirements a new tenant-scoped model has to meet — read that one before adding a model.
 
 **RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
-the code today. Two things will bite whoever writes it, both measured here rather than read in
+the code today. Three things will bite whoever writes it, all measured here rather than read in
 documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
-currently connects as one; and setting the tenant outside an interactive `$transaction` lands on a
-different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
-The measurements, the four steps that remain and the queries that tell you whether the layer is
-enforcing anything are in **`documents/important/RLS_NOTES.md`**.
+currently connects as one; setting the tenant outside an interactive `$transaction` lands on a
+different pooled connection than the query, which under concurrency serves _another tenant's_ rows;
+and a transaction-local setting never goes back to unset, so the obvious policy expression raises a
+cast error instead of returning nothing, on a recycled connection only. The measurements, the four
+steps that remain and the queries that tell you whether the layer is enforcing anything are in
+**`documents/important/RLS_NOTES.md`**; the shape the implementation takes — the roles, the
+policies, where the transaction is opened, and the six settled decisions behind all of it — is in
+**`documents/RLS_DESIGN.md`**.
 
 **Authentication, and the request-scoped tenant.** `src/auth/` is what turns the tenancy layer
 from measured code into code that runs on every request. `TenantContextInterceptor` (registered in
