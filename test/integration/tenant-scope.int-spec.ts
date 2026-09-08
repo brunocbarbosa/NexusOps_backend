@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DomainEvents } from '../../src/tenancy/domain-events';
 import { createPrismaClient } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import {
@@ -140,5 +142,83 @@ describe('the tenant scope, as the runtime opens it', () => {
     });
 
     expect(answer).toBe(tenantA);
+  });
+
+  /**
+   * Settled decision #3: events raised inside a scope are queued and released
+   * after the transaction commits.
+   *
+   * Both of these were silent failures before the queue existed. The first
+   * would have announced a change that never happened; the second would have
+   * woken a client to read a row that was not there yet, and the audit listener
+   * to write through a transaction Prisma had already closed.
+   */
+  describe('domain events', () => {
+    const listen = (emitter: EventEmitter2, seen: string[]) =>
+      emitter.on('probe.thing', (payload: { id: string }) => {
+        seen.push(payload.id);
+      });
+
+    it('releases nothing when the scope rolls back', async () => {
+      const emitter = new EventEmitter2({ wildcard: true });
+      const events = new DomainEvents(emitter);
+      const seen: string[] = [];
+      listen(emitter, seen);
+
+      const id = randomUUID();
+
+      await expect(
+        runWithTenant(tenantA, () => {
+          events.emit('probe.thing', { id });
+          throw new Error('the mutation failed after announcing itself');
+        }),
+      ).rejects.toThrow('the mutation failed after announcing itself');
+
+      // Not "eventually not": the release only ever happens on the way out of a
+      // scope that committed, so a tick is enough to prove it never will.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(seen).toEqual([]);
+    });
+
+    it('releases after the commit, so a listener can read what was announced', async () => {
+      const emitter = new EventEmitter2({ wildcard: true });
+      const events = new DomainEvents(emitter);
+      const domain = `probe-${randomUUID()}.example`;
+
+      // The listener does what the audit trail does: opens its own scope and
+      // reads. If the release happened before the commit it would be looking at
+      // a different connection, and the row would not be there.
+      let resolveSeen: (found: boolean) => void;
+      const seen = new Promise<boolean>((resolve) => {
+        resolveSeen = resolve;
+      });
+      emitter.on('probe.thing', () => {
+        void runWithoutTenant(async () => {
+          const rows = await prisma.$queryRaw<{ n: bigint }[]>`
+            SELECT count(*) AS n FROM tenants WHERE domain = ${domain}
+          `;
+          resolveSeen(Number(rows[0].n) === 1);
+        });
+      });
+
+      let releasedDuringScope = true;
+      await runWithoutTenant(async () => {
+        await prisma.$executeRaw`
+          INSERT INTO tenants (id, name, domain)
+          VALUES (gen_random_uuid(), 'Probe', ${domain})
+        `;
+        events.emit('probe.thing', {});
+        // Still inside the transaction: nothing may have fired yet.
+        await new Promise((resolve) => setImmediate(resolve));
+        releasedDuringScope = false;
+      });
+
+      expect(releasedDuringScope).toBe(false);
+      await expect(seen).resolves.toBe(true);
+
+      await runWithoutTenant(
+        () => prisma.$executeRaw`DELETE FROM tenants WHERE domain = ${domain}`,
+      );
+    });
   });
 });

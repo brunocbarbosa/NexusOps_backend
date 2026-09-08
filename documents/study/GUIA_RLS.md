@@ -31,8 +31,8 @@
 5. [A restrição que decide o desenho inteiro](#5-a-restrição-que-decide-o-desenho-inteiro)
 6. [As três armadilhas medidas](#6-as-três-armadilhas-medidas)
 7. [As quatro decisões que foram fechadas](#7-as-quatro-decisões-que-foram-fechadas)
-8. [O que já está feito](#8-o-que-já-está-feito)
-9. [O que vem agora, passo a passo](#9-o-que-vem-agora-passo-a-passo)
+8. [O que ficou pronto](#8-o-que-ficou-pronto)
+9. [Como foi construído, passo a passo](#9-como-foi-construído-passo-a-passo)
 10. [Como saber se está mesmo funcionando](#10-como-saber-se-está-mesmo-funcionando)
 11. [Glossário](#11-glossário)
 
@@ -441,10 +441,11 @@ escritos nos arquivos continuam verdadeiros.
 
 ---
 
-## 8. O que já está feito
+## 8. O que ficou pronto
 
-**A camada de banco existe; ela ainda não protege nada.** Vale separar as duas coisas, porque é
-fácil ler "as policies existem" e concluir que o sistema está protegido.
+**A camada está ligada e protegendo.** A aplicação conecta como `nexusops_app` — medido, sem
+superusuário e sem `BYPASSRLS` — e uma query feita fora de escopo devolve **zero linhas** em vez das
+linhas de outra empresa.
 
 O que passou a existir:
 
@@ -456,9 +457,13 @@ O que passou a existir:
   também se recusa a aplicar, com uma mensagem que diz o que fazer, se o role não existir.
 - **`DATABASE_URL_APP` e `POSTGRES_APP_PASSWORD`**, e a validação que recusa as duas URLs iguais.
 
-O que **não** mudou: a aplicação continua conectando com `DATABASE_URL`, como o superusuário dono
-das tabelas. Ele ignora todas as policies. Isso é de propósito — é o que faz esta etapa não quebrar
-nada — e é também por que a camada ainda não conta.
+- **O runtime**: todo escopo virou uma transação que informa o tenant, um proxy leva as queries
+  para dentro dela, e o `PrismaModule` conecta com `DATABASE_URL_APP`.
+
+Construir o runtime revelou dois defeitos que ninguém tinha previsto, e os dois só existiam porque
+um escopo não era uma transação: um `catch` que consultava o banco depois de um erro passava a
+receber `25P02` (daí o `attempt()`, que usa `SAVEPOINT`), e a revogação de um refresh token
+reusado — uma ação de segurança — era desfeita pelo `throw` que rejeitava a requisição.
 
 - **A suíte que prova tudo isso**, `test/integration/rls.int-spec.ts` — e que foi ela mesma testada,
   quebrando de propósito o que ela guarda (passo 4 abaixo).
@@ -482,12 +487,12 @@ testes. Tudo isso é a seção seguinte.
 
 ---
 
-## 9. O que vem agora, passo a passo
+## 9. Como foi construído, passo a passo
 
 A ordem importa: o teste vem antes do runtime, porque é o teste que prova que a camada existe.
 
-> Os passos 1 a 4 **já estão feitos** — é o que a seção anterior descreve. Ficam aqui porque
-> explicam o que foi construído e por quê. Os passos 5 e 6 é que continuam pendentes.
+> **Os seis passos estão feitos.** Ficam aqui porque explicam o que foi construído e por quê — é a
+> ordem em que provisionar um ambiente novo, e cada passo diz o que quebra sem ele.
 
 ### Passo 1 ✅ — criar o role de baixo privilégio
 
@@ -563,18 +568,31 @@ aplicação conectando como `nexusops_app`, a criação de empresa, o evento que
 mutação dá rollback, a linha de auditoria caindo depois do commit, e o export rodando até o fim.
 Elas aparecem na saída da suíte como pendentes, em vez de sumirem.
 
-### Passo 5 ⏳ — o runtime
+### Passo 5 ✅ — o runtime
 
 As quatro peças da seção 7: o `TenantScopeService` injetado, a transação no escopo (com o reuso e a
 restauração no aninhado), o proxy que torna `$transaction` reentrante, e os eventos adiados. Mais a
 divisão do `ensureAdminMaster`, para o bcrypt não rodar dentro da transação.
 
-### Passo 6 ⏳ — medir
+### Passo 6 ✅ — medir
 
-O `RLS_DESIGN.md` termina prometendo um número, e não uma frase: quantas conexões cada formato de
-requisição segura, e quanta concorrência o pool configurado aguenta. Segurar uma transação pela
-duração da requisição muda o perfil de falha da aplicação — uma requisição lenta deixa de ser só
-lenta e passa a segurar uma conexão. Isso precisa de medida, não de otimismo.
+O `RLS_DESIGN.md` termina prometendo um número, e não uma frase. Aqui está ele: quantas conexões
+cada formato de requisição segura, contado de dentro do escopo contra o `pg_stat_activity`.
+
+| Formato da requisição                                                | Conexões em transação |
+| -------------------------------------------------------------------- | --------------------- |
+| Requisição comum — um escopo                                         | 1                     |
+| Rota de plataforma — `inCompany()` aninhado no escopo do interceptor | **1**                 |
+| Criação de empresa — `runWithoutTenant` com escopo de tenant dentro  | 1                     |
+
+A linha do meio é a que importa: o desenho original previa **duas** conexões ali, e a decisão #0
+eliminou isso ao fazer o escopo aninhado reusar a transação aberta.
+
+E o teto: **vinte escopos simultâneos chegaram a dez conexões**, que é o `max` default do `pg`. A
+décima primeira requisição não falha — ela espera, e desiste depois de 5 segundos se nenhuma
+conexão liberar. Ou seja, o tamanho do pool virou um teto de _requisições_ concorrentes, não de
+queries concorrentes. Configurar o `max` deliberadamente é o próximo ajuste, e é decisão de
+configuração, não de desenho.
 
 ---
 

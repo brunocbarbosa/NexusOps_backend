@@ -1,10 +1,11 @@
 # Row-Level Security
 
-> **Status: provisioned, not enforcing.** The low-privilege role and the seven policies now exist —
-> `scripts/initdb/01-app-role.sql` and the `row_level_security` migration. What does not exist is
-> `set_config`: the application still connects with `DATABASE_URL`, as the owning superuser, which
-> bypasses every policy. So step 1 of the four below is done, step 2 is done, and steps 3 and 4 are
-> what stands between "configured" and "protecting anything". This document is the preparation for when that layer gets written, and it exists
+> **Status: implemented and enforcing.** All four steps below are done. The application connects as
+> `nexusops_app` — measured, `rolsuper` and `rolbypassrls` both false — every scope sets the tenant
+> inside an interactive transaction, and a query made outside a scope returns zero rows rather than
+> another tenant's. The measurements in Part II are what the implementation was built against, and
+> they are why the layer works rather than merely existing; they are kept because a Prisma or
+> PostgreSQL upgrade can take any of them away silently. This document is the preparation for when that layer gets written, and it exists
 > because the measurements below cost real debugging time — losing them would mean paying for them
 > again.
 >
@@ -42,6 +43,9 @@ extension. That is the concrete hole RLS closes. See
 reach.
 
 ### The four steps
+
+All four are done. They are kept in the imperative because they are also the checklist for
+provisioning a new environment, and because each one names what breaks without it.
 
 1. **Provision a `NOSUPERUSER NOBYPASSRLS` role that does not own the tables**, with DML only.
    `.env.example` already reserves `DATABASE_URL_APP` for it; migrations keep using the owning

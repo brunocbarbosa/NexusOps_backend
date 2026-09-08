@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { Test, TestingModule } from '@nestjs/testing';
+import { validateEnv } from '../../src/config/env.validation';
 import { PrismaClient } from '../../src/generated/prisma/client';
+import { PRISMA } from '../../src/prisma/prisma.client';
+import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
+import { PrismaModule } from '../../src/prisma/prisma.module';
 import { resetDatabase } from '../utils/reset-database';
 
 /**
@@ -332,18 +338,59 @@ describe('Row-Level Security (database layer)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Waiting on Part II of documents/RLS_DESIGN.md — the runtime. They are listed
-  // rather than omitted so the gap is visible in the suite's own output instead
-  // of living only in a design document.
-  describe('waiting on the runtime (Part II)', () => {
-    it.todo(
-      'the application connects as nexusops_app, so a query outside a scope returns nothing',
-    );
-    it.todo(
-      'CompaniesService.create() still creates a company, its counter and its first ADMIN',
-    );
-    it.todo('a mutation that rolls back emits no domain event');
-    it.todo('the audit row for a committed mutation lands after the commit');
-    it.todo('a ticket export runs to completion as the application role');
+  describe('what the application itself connects as', () => {
+    // The one assertion that says the layer is live rather than merely
+    // configured. Everything above proves the database enforces; this proves the
+    // application is subject to it — which is a single line in
+    // `PrismaModule`'s factory, and the whole difference between a policy that
+    // protects and a policy that decorates.
+    let moduleRef: TestingModule;
+    let appClient: ExtendedPrismaClient;
+
+    beforeAll(async () => {
+      moduleRef = await Test.createTestingModule({
+        imports: [
+          ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+          PrismaModule,
+        ],
+      }).compile();
+      appClient = moduleRef.get<ExtendedPrismaClient>(PRISMA);
+    });
+
+    afterAll(async () => {
+      await moduleRef.close();
+    });
+
+    it('connects as the restricted role, not as the owner', async () => {
+      const [role] = await appClient.$queryRaw<
+        { rolname: string; rolsuper: boolean; rolbypassrls: boolean }[]
+      >`SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`;
+
+      expect(role).toEqual({
+        rolname: 'nexusops_app',
+        rolsuper: false,
+        rolbypassrls: false,
+      });
+    });
+
+    it('reads nothing outside a scope, and does so without erroring', async () => {
+      const rows = await appClient.$queryRaw<{ id: string }[]>`
+        SELECT id FROM users
+      `;
+      expect(rows).toEqual([]);
+    });
   });
+
+  // ---------------------------------------------------------------------------
+  // The rest of what Part III promised is covered where the behaviour lives,
+  // rather than duplicated here — and all of it now runs as `nexusops_app`,
+  // which is what makes those suites proof of anything:
+  //
+  //  - `tenant-scope.int-spec.ts` — a scope is one transaction, raw SQL lands
+  //    inside it, nesting switches and restores, a rolled-back scope releases no
+  //    event, and a released one lands after the commit.
+  //  - `platform-companies.int-spec.ts` — `CompaniesService.create()` still
+  //    creates a company, its counter and its first ADMIN. That is the call site
+  //    settled decision #0 exists for.
+  //  - `reports-queue.int-spec.ts` — a ticket export runs to completion.
 });

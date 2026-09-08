@@ -19,8 +19,9 @@ connect the tenancy layer to Nest at all. `src/app.*` is still the scaffold, kep
 
 The helpdesk is written: `src/tickets/` and `src/comments/` are the domain, `src/audit/` is the
 event-driven trail, `src/reports/` is the BullMQ export and `src/realtime/` is the notification
-gateway, with the event contract they share in `src/events/`. Row-Level Security is the one thing
-from the original architecture that is still missing.
+gateway, with the event contract they share in `src/events/`. Row-Level Security is in and
+enforcing: `scripts/initdb/` provisions the role the policies apply to, `src/tenancy/` opens every
+scope as a transaction that sets the tenant, and the application connects as that restricted role.
 
 Other documents, by purpose:
 
@@ -248,8 +249,10 @@ redundant:
    `tenant_id` for the lifetime of a request. A Prisma Client Extension reads it and injects the
    tenant filter into every query. This is why the tenant filter must never be written by hand in
    a service — a hand-written query is a query that can be wrong.
-2. PostgreSQL native Row-Level Security as the backstop, in case the extension is bypassed
-   (raw SQL, a mistake in the extension itself).
+2. PostgreSQL native Row-Level Security as the backstop, for when the extension is bypassed
+   (raw SQL, a mistake in the extension itself). It is on: the application connects as
+   `nexusops_app`, which cannot bypass a policy, so a query made outside a scope returns **zero
+   rows** rather than another tenant's.
 
 The critical consequence: **BullMQ workers and WebSocket handlers have no HTTP request**, so the
 `AsyncLocalStorage` context is empty there. Tenant identity must be carried explicitly in the job
@@ -264,6 +267,18 @@ everywhere in the codebase:
 - **Never reach for a `currentTenantId(): string | undefined`.** It does not exist on purpose,
   because `?? fallback` is exactly the silent bypass this design prevents. Use `requireTenantId()`,
   which returns a string or throws, and `runWithoutTenant()` when a read genuinely must be unscoped.
+- **Opening a scope is a method on an injected `TenantScopeService`, not a free function.** A scope
+  is a database transaction now — it sets `app.tenant_id` on one connection and a proxy over the
+  client keeps the queries on it. `src/tenancy/tenant-context.ts` keeps only the readers.
+- **Recover from a database error through `scope.attempt()`, never around it.** A failed statement
+  aborts the whole transaction, so a `catch` that queries afterwards gets `25P02`. `attempt()` runs
+  its body inside a `SAVEPOINT` so the transaction survives.
+- **A scope that throws rolls back everything it wrote.** That is right for a mutation and wrong for
+  a write made _because_ the request is being rejected — `AuthService.refresh()` revoking a replayed
+  token family is the case. Return a verdict from the scope and throw outside it.
+- **Domain events go through `DomainEvents`, not `EventEmitter2`.** It queues while a transaction is
+  open and releases after the commit, so a rolled-back mutation announces nothing and a listener can
+  read what it was told about.
 
 The extension's measured behaviour against Prisma 7.10.0 — five findings the design depends on,
 including why nested access cannot be intercepted and why that hole is closed in the schema instead
@@ -272,13 +287,12 @@ including why nested access cannot be intercepted and why that hole is closed in
 is written against: the exported API, how each Prisma operation is treated, and the four schema
 requirements a new tenant-scoped model has to meet — read that one before adding a model.
 
-**RLS is provisioned but not enforcing.** `scripts/initdb/01-app-role.sql` creates the
-`NOSUPERUSER NOBYPASSRLS` role and the `row_level_security` migration carries the seven policies,
-the grants and the default privileges — but the application still connects with `DATABASE_URL`, as
-the owning superuser, so every policy is bypassed. Switching `PrismaModule` to `DATABASE_URL_APP` is
-what turns the layer on, and it cannot be done alone: every query has to be inside a transaction
-that set the tenant first, or it silently returns nothing. Three things will bite whoever finishes
-it, all measured here rather than read in documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
+**RLS is implemented and enforcing.** `scripts/initdb/01-app-role.sql` creates the
+`NOSUPERUSER NOBYPASSRLS` role, the `row_level_security` migration carries the seven policies, the
+grants and the default privileges, and `PrismaModule` connects with `DATABASE_URL_APP` — so the
+application is subject to them. A query made outside a scope returns zero rows rather than another
+tenant's. Three things bite whoever touches this layer, all measured here rather than read in
+documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
 currently connects as one; setting the tenant outside an interactive `$transaction` lands on a
 different pooled connection than the query, which under concurrency serves _another tenant's_ rows;
 and a transaction-local setting never goes back to unset, so the obvious policy expression raises a

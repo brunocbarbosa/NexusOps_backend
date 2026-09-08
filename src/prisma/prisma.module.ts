@@ -37,9 +37,17 @@ import type { ExtendedPrismaClient } from './prisma.client';
       provide: PRISMA,
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
+        // `DATABASE_URL_APP`, not `DATABASE_URL`: the application connects as
+        // `nexusops_app`, a NOSUPERUSER NOBYPASSRLS role that owns no table, so
+        // the Row-Level Security policies actually apply to it. `DATABASE_URL`
+        // stays the owner and keeps running the migrations and the suites'
+        // TRUNCATE. validateEnv refuses a configuration where the two are equal,
+        // because that is not a misconfiguration that announces itself — it is
+        // RLS quietly enforcing nothing.
+        //
         // getOrThrow rather than get: validateEnv already guarantees the value,
         // and `get` would type it as possibly-undefined for no reason.
-        createPrismaClient(config.getOrThrow<string>('DATABASE_URL')),
+        createPrismaClient(config.getOrThrow<string>('DATABASE_URL_APP')),
     },
     TenantScopeService,
   ],

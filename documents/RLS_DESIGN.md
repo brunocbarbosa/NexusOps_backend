@@ -2,12 +2,10 @@
 
 > **Status: design, not implemented.** This is the plan for the second isolation layer that
 > [`important/RLS_NOTES.md`](./important/RLS_NOTES.md) has been holding measurements for. **Every
-> decision is settled**; Part IV has all six with their reasoning. **Parts I and III are built** —
-> the role, the policies, the grants, the two connection strings, and the suite that proves they
-> enforce, all verified against a stack created from scratch. **Part II is not**: the application
-> still connects with `DATABASE_URL`, as the owning superuser, so **the policies enforce nothing on
-> the application yet**. That is deliberate — it is what let this land without breaking anything —
-> and it is also why the layer cannot be called done. Four of the six — #0, #1, #2 and #3 — came from reading the call
+> decision is settled**; Part IV has all six with their reasoning. **It is built.** The role, the
+> policies, the grants, the runtime and the suites are in the repository, and the application
+> connects as `nexusops_app` — measured: `rolsuper` and `rolbypassrls` both false, and a query
+> outside a scope returns zero rows. Part VI now carries numbers instead of a promise. Four of the six — #0, #1, #2 and #3 — came from reading the call
 > sites against this design and measuring what it would do to them, and all four changed something,
 > so Part II describes the design they produced rather than the one this document started with.
 
@@ -256,6 +254,40 @@ repository and the reason an e2e test exercises the same wiring production runs.
 `APP_INTERCEPTOR` provider instead would get the injection for free and move that registration out
 of the one file that is supposed to hold it. `app.setup.spec.ts`'s fake application grows a `get`.
 
+### Recovering from a database error: `attempt()`
+
+Found by building it, and it belongs in the design because nothing in the plan predicted it.
+
+**Any database error aborts the whole transaction**, not only the statement that caused it: every
+statement after it answers `25P02 current transaction is aborted`. That was harmless while a scope
+was not a transaction — a failed write ended its own small unit of work. Now a request is one
+transaction, so code that catches a constraint violation and then _asks the database why_ gets
+`25P02` instead of an answer.
+
+`UsersService.create()` is exactly that shape: it inserts, catches the unique violation, and reads
+back to tell "this address is taken" from "this person was deactivated" — the distinction
+`POST /users/:id/restore` exists for. It broke, and it broke as a 500.
+
+`TenantScopeService.attempt(fn)` is the chokepoint: it runs `fn` inside a `SAVEPOINT` and rolls back
+to it on failure, so the transaction survives and the original error still propagates. Anything that
+means to recover from a database error has to go through it. Outside a transaction it is a
+pass-through, so the unit tier and any future non-transactional path behave as before.
+
+### A write that must outlive the request that fails
+
+The other thing building it found, and the more serious of the two.
+
+`AuthService.refresh()` detects a replayed refresh token, revokes the user's whole token family, and
+then throws a 401. Under one transaction per request, the throw rolled the revocation back — so the
+thief kept a working successor token, the legitimate holder was never logged out, and the endpoint
+still answered 401. Exactly one test in the repository noticed.
+
+The rule it produces is worth stating generally, because the next security-relevant write will hit
+it too: **a scope that throws rolls back everything it wrote, which is right for a mutation and
+wrong for an action taken _because_ the request is being rejected.** The fix is not a second
+transaction; it is to let the scope return a verdict and throw outside it, so the write commits and
+the request is still refused.
+
 ### The proxy
 
 `createPrismaClient` returns a `Proxy` over the extended client:
@@ -418,18 +450,28 @@ they guard:
 | `WITH CHECK` deleted           | **0 tests fail — and correctly so.** See Part I: PostgreSQL reuses `USING` as the write check on a `FOR ALL` policy |
 | `WITH CHECK (true)`            | 5 tests fail — this is the hole the previous row is not                                                             |
 
-### Still waiting on Part II
+### The runtime's own suite
 
-Listed as `it.todo` rather than left out, so the gap shows in the suite's own output instead of only
-in this document: the application connecting as `nexusops_app`; `CompaniesService.create()` still
-creating a company, its counter and its first ADMIN; a rolled-back mutation emitting no event; the
-audit row landing after the commit; and a ticket export running to completion as the application
-role.
+`test/integration/tenant-scope.int-spec.ts`, nine tests, and it exists because **no other suite can
+see what it checks**. The proxy could fall through to the base client on every call and everything
+else would still pass — until `DATABASE_URL_APP` was switched on, at which point every read would
+return nothing. It pins that a scope is one transaction, that raw SQL lands inside it, that a nested
+scope switches the tenant and restores it, that unscoped writes the empty string, that `attempt()`
+leaves the transaction usable, and that a rolled-back scope releases no event while a committed one
+releases after the commit — proved by a listener that reads the row it was told about.
+
+Checked the same way as the rest: removing the restore fails one test, removing the event deferral
+fails two, pointing the proxy at the base client fails six, and reverting `PrismaModule` to
+`DATABASE_URL` fails the two in `rls.int-spec.ts` that assert what the application connects as.
 
 `resetDatabase` keeps connecting as the owner: it issues `TRUNCATE`, which is a privilege the
 application role does not have and should not get. So the suites carry two connection strings, and
 `test/utils/create-test-app.ts` will have to build the application against `DATABASE_URL_APP` while
 the cleanup helper keeps `DATABASE_URL`. That part belongs to Part II and is not done.
+
+`scripts/docker-smoke.js` needs no change: it builds a bare `PrismaClient` rather than going through
+`createPrismaClient`, and connects as the owner, so it has neither the extension nor the proxy and
+reaches only `tenants`, which carries no policy.
 
 CI has `DATABASE_URL_APP` in the `docker` job's boot step, sourced from the `.env.test` the step
 already loads. `POSTGRES_APP_PASSWORD` deliberately is **not** there, against what an earlier draft
@@ -598,10 +640,29 @@ then the number Part VI asks for.
 
 ## Part VI — the risk worth writing down
 
-Holding a transaction for the duration of a request changes the application's failure profile.
-Today a slow request is slow; afterwards, a slow request holds a pooled connection, and under
-enough concurrency pool exhaustion turns latency into errors. The mitigations are the 15s timeout,
-a deliberately sized pool, and measurement.
+Holding a transaction for the duration of a request changes the application's failure profile. A
+slow request no longer just takes long; it holds a pooled connection while it does, and under enough
+concurrency pool exhaustion turns latency into errors. The mitigations are the 15s timeout, a
+deliberately sized pool, and measurement.
+
+**The measurements, as promised.** Connections held, counted from inside the scope against
+`pg_stat_activity`:
+
+| Request shape                                                    | Connections in a transaction |
+| ---------------------------------------------------------------- | ---------------------------- |
+| An ordinary request — one scope                                  | 1                            |
+| A platform route — `inCompany()` nested inside the interceptor's | **1**                        |
+| Company creation — `runWithoutTenant` with a tenant scope inside | 1                            |
+
+The middle row is the one worth looking at: the design as first drafted predicted a peak of two
+there, and settled decision #0 removed it by making a nested scope reuse the open transaction.
+
+**What the configured pool sustains: ten.** Twenty simultaneous scopes peaked at ten connections,
+which is `pg`'s default `max`. The eleventh request does not fail — it waits for a connection, and
+gives up after `maxWait` (5s) if none frees. So the pool size is now a throughput ceiling on
+concurrent _requests_ rather than on concurrent queries, and `max` on `PrismaPg` should be set
+deliberately rather than left at the driver default. It still is at the default today; that is the
+next thing to change, and it is a configuration decision rather than a design one.
 
 Lock hold times change with it, and one case is already known: `TicketsService.create()` takes the
 `ticket_counters` row lock and, under re-entrancy, keeps it until the request commits rather than
