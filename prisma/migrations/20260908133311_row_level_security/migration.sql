@@ -78,9 +78,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 -- One policy per tenant-scoped table, all identical.
 --
 -- `USING` covers reads, UPDATE and DELETE; `WITH CHECK` covers INSERT and the
--- UPDATE that tries to move a row into another tenant. Without the second half
--- the policy still allows writing *out* of the tenant, which is the half that
--- is easy to forget.
+-- UPDATE that tries to move a row into another tenant.
+--
+-- It is spelled out rather than omitted, but not for the reason one might
+-- expect: on a FOR ALL policy PostgreSQL reuses `USING` as the write check when
+-- WITH CHECK is absent, so leaving it off is not a hole -- measured, by deleting
+-- it and running test/integration/rls.int-spec.ts, which stayed green. It is
+-- here to state the write rule instead of implying it, so that narrowing `USING`
+-- later does not silently narrow writes too. The hole that is real is
+-- `WITH CHECK (true)`; the suite fails five tests on that one.
 --
 -- `nullif(..., '')` is not decoration. A transaction-local setting never goes
 -- back to unset: once a connection has served one scoped transaction, its reset

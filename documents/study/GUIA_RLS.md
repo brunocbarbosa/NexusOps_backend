@@ -86,8 +86,11 @@ a query veio do Prisma, de um `$queryRaw`, de um script de manutenção ou de al
 | `USING`      | o que você consegue **ler** (e apagar, e alterar)         |
 | `WITH CHECK` | o que você consegue **escrever** (inserir, ou mover para) |
 
-Sem o `WITH CHECK`, a policy impede a Empresa A de _ler_ os dados da B — mas não impede A de
-_inserir_ uma linha carimbada como sendo da B. Metade da proteção.
+Uma sutileza que vale saber, porque é fácil errar nos dois sentidos: numa policy `FOR ALL`, se você
+**omitir** o `WITH CHECK`, o PostgreSQL reusa a expressão do `USING` para a escrita — então omitir
+não abre buraco. O buraco de verdade é escrever `WITH CHECK (true)`, que aí sim deixa a Empresa A
+inserir uma linha carimbada como sendo da B. Este projeto escreve as duas metades mesmo assim, para
+dizer a regra de escrita em voz alta em vez de deixá-la implícita.
 
 ### Role
 
@@ -457,6 +460,9 @@ O que **não** mudou: a aplicação continua conectando com `DATABASE_URL`, como
 das tabelas. Ele ignora todas as policies. Isso é de propósito — é o que faz esta etapa não quebrar
 nada — e é também por que a camada ainda não conta.
 
+- **A suíte que prova tudo isso**, `test/integration/rls.int-spec.ts` — e que foi ela mesma testada,
+  quebrando de propósito o que ela guarda (passo 4 abaixo).
+
 Verificado contra um stack criado do zero, como papel `nexusops_app`: fora de escopo o `SELECT`
 devolve zero linhas; dentro, só as do tenant; `INSERT` cross-tenant, `UPDATE` tirando a linha do
 tenant e `TRUNCATE` são recusados com `42501`.
@@ -480,8 +486,8 @@ testes. Tudo isso é a seção seguinte.
 
 A ordem importa: o teste vem antes do runtime, porque é o teste que prova que a camada existe.
 
-> Os passos 1, 2 e 3 **já estão feitos** — é o que a seção anterior descreve. Ficam aqui porque
-> explicam o que foi construído e por quê. Os passos 4, 5 e 6 é que continuam pendentes.
+> Os passos 1 a 4 **já estão feitos** — é o que a seção anterior descreve. Ficam aqui porque
+> explicam o que foi construído e por quê. Os passos 5 e 6 é que continuam pendentes.
 
 ### Passo 1 ✅ — criar o role de baixo privilégio
 
@@ -520,26 +526,42 @@ Mais os `GRANT` para o role novo — e o `ALTER DEFAULT PRIVILEGES`, que é uma 
 sem ele, a **próxima** migration que criar uma tabela quebra a aplicação em produção, e nenhum teste
 pega, porque o banco de teste é construído pela mesma rodada de migrations.
 
-### Passo 4 ⏳ — os testes (`test/integration/rls.int-spec.ts`)
+### Passo 4 ✅ — os testes (`test/integration/rls.int-spec.ts`)
 
-Dez verificações. As três primeiras são baratas e só provam a **ausência** de proteção; as demais é
-que provam que ela existe:
+Doze verificações que rodam hoje, mais cinco marcadas como pendentes. Elas conectam **como o role da
+aplicação** e escrevem SQL cru na mão, sem passar pela aplicação — porque o que existe até aqui é
+uma camada de banco, e uma asserção feita através do `PrismaModule` hoje passaria por cima das
+policies em vez de testá-las.
 
-| #   | O que prova                                                             |
-| --- | ----------------------------------------------------------------------- |
-| 1   | o role conectado não é superusuário nem tem `BYPASSRLS`                 |
-| 2   | as sete tabelas têm RLS ligado **e** forçado                            |
-| 3   | existe uma policy por tabela                                            |
-| 4   | SQL cru fora de escopo devolve zero linhas                              |
-| 5   | dentro de um escopo, devolve as linhas daquele tenant e nenhuma outra   |
-| 6   | um `INSERT` cross-tenant é recusado pelo `WITH CHECK`                   |
-| 7   | um escopo aninhado enxerga só o seu, e sair dele **restaura** o de fora |
-| 8   | criar empresa continua funcionando (o caso que quebrava na #0)          |
-| 9   | mutação que dá rollback não dispara evento (a #3)                       |
-| 10  | um export de chamados roda até o fim com o role da aplicação (a #2)     |
+| Grupo                 | O que prova                                                                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **está configurado?** | o role não é superusuário nem tem `BYPASSRLS`; toda tabela com `tenant_id` tem RLS ligado, forçado e uma policy; `tenants` **não** tem policy e continua legível; não pode `TRUNCATE` |
+| **protege?**          | fora de escopo, nada; fora de escopo **numa conexão já usada**, nada; dentro do escopo, só aquele tenant; `INSERT` cross-tenant recusado; `UPDATE` tirando a linha do tenant recusado |
+| **aninhamento**       | trocar o tenant no meio da transação troca o escopo, e restaurar volta — inclusive de volta para "sem tenant"; uma recusa dentro de `SAVEPOINT` não mata a transação                  |
+
+O primeiro grupo é barato e só prova a **ausência** de proteção. Os outros dois é que provam que ela
+existe.
+
+A lista de tabelas é **lida do catálogo**, não escrita à mão: se alguém criar um model com
+`tenant_id` e esquecer a policy, o teste quebra aqui em vez de vazar em produção.
+
+**E os testes foram testados.** Um teste verde que passaria de qualquer jeito não prova nada, então
+cada asserção foi conferida quebrando o que ela guarda:
+
+| Quebra aplicada                | O que aconteceu                                                          |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| tirar o `nullif` da policy     | 2 testes falham                                                          |
+| desligar o RLS de `users`      | 9 testes falham                                                          |
+| apagar o `WITH CHECK`          | **nenhum falha — e está certo**: o Postgres reusa o `USING` para escrita |
+| trocar por `WITH CHECK (true)` | 5 testes falham — esse é o furo de verdade                               |
 
 Os testes precisam de duas strings de conexão: a limpeza do banco usa `TRUNCATE`, que é um
 privilégio que o role da aplicação não tem — e não deve ter.
+
+Cinco verificações ficaram como `it.todo`, porque dependem do runtime que ainda não existe: a
+aplicação conectando como `nexusops_app`, a criação de empresa, o evento que não dispara quando a
+mutação dá rollback, a linha de auditoria caindo depois do commit, e o export rodando até o fim.
+Elas aparecem na saída da suíte como pendentes, em vez de sumirem.
 
 ### Passo 5 ⏳ — o runtime
 

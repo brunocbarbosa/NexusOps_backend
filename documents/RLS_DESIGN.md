@@ -2,12 +2,12 @@
 
 > **Status: design, not implemented.** This is the plan for the second isolation layer that
 > [`important/RLS_NOTES.md`](./important/RLS_NOTES.md) has been holding measurements for. **Every
-> decision is settled**; Part IV has all six with their reasoning. **Part I is built** — the role,
-> the policies, the grants and the two connection strings are in the repository, verified against a
-> stack created from scratch. Parts II and III are not: the application still connects with
-> `DATABASE_URL`, as the owning superuser, so **the policies are provisioned and enforce nothing
-> yet**. That is deliberate — it keeps this change from breaking anything — and it is also why the
-> layer cannot be called done. Four of the six — #0, #1, #2 and #3 — came from reading the call
+> decision is settled**; Part IV has all six with their reasoning. **Parts I and III are built** —
+> the role, the policies, the grants, the two connection strings, and the suite that proves they
+> enforce, all verified against a stack created from scratch. **Part II is not**: the application
+> still connects with `DATABASE_URL`, as the owning superuser, so **the policies enforce nothing on
+> the application yet**. That is deliberate — it is what let this land without breaking anything —
+> and it is also why the layer cannot be called done. Four of the six — #0, #1, #2 and #3 — came from reading the call
 > sites against this design and measuring what it would do to them, and all four changed something,
 > so Part II describes the design they produced rather than the one this document started with.
 
@@ -108,8 +108,15 @@ CREATE POLICY tenant_isolation ON "users"
 ```
 
 `USING` covers reads, `UPDATE` and `DELETE`. `WITH CHECK` covers `INSERT` and the `UPDATE` that
-tries to move a row into another tenant — **without it the policy would still allow writing out of
-the tenant**, which is the half of the problem that is easy to forget.
+tries to move a row into another tenant.
+
+An earlier version of this section said that omitting `WITH CHECK` would leave the policy allowing
+writes _out_ of the tenant. That is wrong, measured by deleting it and running the suite: on a
+`FOR ALL` policy PostgreSQL reuses the `USING` expression as the write check, and the cross-tenant
+`INSERT` is refused either way. It is written out anyway, because it states the write rule instead
+of leaving it implied — and because the day someone narrows `USING` for an unrelated reason, the
+write rule should not follow it silently. The hole that does exist is `WITH CHECK (true)`, and
+`rls.int-spec.ts` fails on five tests when the policy is mutated to it.
 
 The `true` is `missing_ok`. **The `nullif` is not decoration**, and an earlier draft of this section
 omitted it: without it the policy raises an error instead of returning nothing, on any connection
@@ -366,40 +373,69 @@ is the sentence the second worker will need.
 
 ## Part III — tests and CI
 
-A new `test/integration/rls.int-spec.ts`, covering both what the three diagnostic queries in
-`RLS_NOTES.md` report and what only step 4 can prove:
+**Built**, as `test/integration/rls.int-spec.ts`: 12 tests plus 5 `it.todo`s. It connects **as the
+application role and drives raw SQL by hand**, and imports nothing from `src/tenancy/`. That is the
+point rather than an omission — the extension is the first layer, and this file exists to show the
+second one standing without it. It is also why the suite could be written before Part II: what it
+tests is a database, not a runtime.
 
-1. the connected role is neither `rolsuper` nor `rolbypassrls`;
-2. all seven tables report `relrowsecurity` **and** `relforcerowsecurity`;
-3. `pg_policies` has a policy per table;
-4. as the application role, raw SQL outside any scope returns zero rows;
-5. inside a scope it returns that tenant's rows and no others;
-6. a cross-tenant `INSERT` is refused by `WITH CHECK`;
-7. a nested scope sees only its own tenant, and **leaving it restores the enclosing one** — the
-   guard for settled decision #0, and the one that fails if the restore is dropped;
-8. `CompaniesService.create()` still creates a company, its counter and its first ADMIN — the call
-   site that the narrower rule killed, kept as a regression rather than as a story in Part IV;
-9. a mutation that rolls back emits nothing, and the audit row for one that commits lands after the
-   commit — the guard for settled decision #3;
-10. a ticket export runs to completion as the application role — the worker is what `CLAUDE.md`
-    calls the most likely place in the project for a tenant leak, and settled decision #2 is the one
-    that changes how it reaches the database.
+Two clients: the owner seeds (it is a superuser here, so it bypasses the policies), and the
+application role asserts. The application client is built with `max: 1` on the `pg` pool, which is
+not tuning — it pins every query to one physical connection, and that is what makes the recycled
+connection test deterministic instead of dependent on which connection the pool handed out.
 
-Items 1–3 are cheap and prove only the absence of enforcement. Items 4–10 are the ones that turn
+The table list is **read from the catalogue**, not hard-coded: every table carrying `tenant_id` must
+report `relrowsecurity`, `relforcerowsecurity` and exactly one policy. A model added later with a
+`tenant_id` and no policy therefore fails here rather than leaking in production. A hard-coded list
+of the seven only guards the query itself, so that a query returning nothing cannot make the whole
+assertion vacuous.
+
+| Group                | What it pins                                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **is it configured** | the role is neither `rolsuper` nor `rolbypassrls`; every `tenant_id` table has RLS enabled, forced, and one policy; `tenants` has **no** policy and is still readable; no TRUNCATE                                             |
+| **does it enforce**  | outside a scope, nothing; outside a scope **on a connection that has served one**, still nothing; inside a scope, that tenant only; cross-tenant `INSERT` refused; `UPDATE` moving a row out refused; both tenants left intact |
+| **nesting**          | re-setting the tenant mid-transaction switches scope and restoring puts it back — including back to unscoped; a refusal taken in a `SAVEPOINT` leaves the transaction usable                                                   |
+
+The first group proves only the **absence** of enforcement, quickly. The other two are what turn
 this layer from configured into verified.
 
-**An expected refusal has to be taken inside a `SAVEPOINT`.** `42501` aborts the transaction like
-any other error, so items 6 and 7 leave the transaction in `25P02` for everything after them unless
-they roll back to a savepoint. Measured while writing Part II, by getting it wrong first.
+Three of them exist because of things measured rather than expected. `tenants` must have no policy
+or login cannot find a tenant to log into, and the failure would read as "invalid credentials". The
+recycled-connection test is the one that would be a `22P02` rather than an empty result without
+`nullif` in the policy. And an expected refusal has to be taken inside a `SAVEPOINT`, because
+`42501` aborts the transaction like any other error and everything after it returns `25P02` —
+measured by getting it wrong while writing this suite.
+
+### What the suite was checked against
+
+A green test that would pass anyway proves nothing, so the assertions were checked by breaking what
+they guard:
+
+| Mutation                       | Result                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `nullif` removed from a policy | 2 tests fail — the recycled connection and the restore-to-unscoped                                                  |
+| `DISABLE ROW LEVEL SECURITY`   | 9 tests fail                                                                                                        |
+| `WITH CHECK` deleted           | **0 tests fail — and correctly so.** See Part I: PostgreSQL reuses `USING` as the write check on a `FOR ALL` policy |
+| `WITH CHECK (true)`            | 5 tests fail — this is the hole the previous row is not                                                             |
+
+### Still waiting on Part II
+
+Listed as `it.todo` rather than left out, so the gap shows in the suite's own output instead of only
+in this document: the application connecting as `nexusops_app`; `CompaniesService.create()` still
+creating a company, its counter and its first ADMIN; a rolled-back mutation emitting no event; the
+audit row landing after the commit; and a ticket export running to completion as the application
+role.
 
 `resetDatabase` keeps connecting as the owner: it issues `TRUNCATE`, which is a privilege the
 application role does not have and should not get. So the suites carry two connection strings, and
-`test/utils/create-test-app.ts` has to build the application against `DATABASE_URL_APP` while the
-cleanup helper keeps `DATABASE_URL`.
+`test/utils/create-test-app.ts` will have to build the application against `DATABASE_URL_APP` while
+the cleanup helper keeps `DATABASE_URL`. That part belongs to Part II and is not done.
 
-CI needs `DATABASE_URL_APP` and `POSTGRES_APP_PASSWORD` added to the `docker` job's boot step, which
-feeds the container `.env.test` values. The role itself arrives through the test compose file's
-initdb mount, so no separate provisioning step is needed there.
+CI has `DATABASE_URL_APP` in the `docker` job's boot step, sourced from the `.env.test` the step
+already loads. `POSTGRES_APP_PASSWORD` deliberately is **not** there, against what an earlier draft
+of this section said: it is read by the database container, not by the application, and
+`docker-compose.test.yml` carries it. The role arrives through that file's initdb mount, so there is
+no separate provisioning step.
 
 ---
 

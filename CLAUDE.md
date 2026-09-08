@@ -99,11 +99,14 @@ npm run prisma:reset      # drop and rebuild the database from migrations
 npm run prisma:studio
 ```
 
-Run a single unit test file or a single test by name:
+Run a single unit test file or a single test by name. **The config is not optional** — there is no
+`jest` key in `package.json` and no `jest.config.*` at the root, so a bare `npx jest` finds no
+config, falls back to babel, and dies on the first TypeScript annotation with
+`SyntaxError: Missing semicolon`, which reads like a syntax error in your own file:
 
 ```bash
-npx jest src/path/to/file.spec.ts
-npx jest -t "substring of the test name"
+npm run test:unit -- src/path/to/file.spec.ts
+npm run test:unit -- -t "substring of the test name"
 
 # The integration and e2e tiers must keep both the --experimental-vm-modules flag
 # (see "Prisma 7 wiring" below) and DOTENV_CONFIG_PATH, or they will run against
