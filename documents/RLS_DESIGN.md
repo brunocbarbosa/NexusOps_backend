@@ -2,8 +2,12 @@
 
 > **Status: design, not implemented.** This is the plan for the second isolation layer that
 > [`important/RLS_NOTES.md`](./important/RLS_NOTES.md) has been holding measurements for. **Every
-> decision is settled**; Part IV has all six with their reasoning, and what remains is building it.
-> Nothing here has been built. Four of the six — #0, #1, #2 and #3 — came from reading the call
+> decision is settled**; Part IV has all six with their reasoning. **Part I is built** — the role,
+> the policies, the grants and the two connection strings are in the repository, verified against a
+> stack created from scratch. Parts II and III are not: the application still connects with
+> `DATABASE_URL`, as the owning superuser, so **the policies are provisioned and enforce nothing
+> yet**. That is deliberate — it keeps this change from breaking anything — and it is also why the
+> layer cannot be called done. Four of the six — #0, #1, #2 and #3 — came from reading the call
 > sites against this design and measuring what it would do to them, and all four changed something,
 > so Part II describes the design they produced rather than the one this document started with.
 
@@ -128,8 +132,16 @@ one back, and "back to unscoped" can only be written as `set_config(..., '')` �
 read `''` as "no tenant" rather than as a malformed uuid. The two are one mechanism.
 
 `FORCE` goes on even though the application role is not the owner, because `FORCE` is what subjects
-the **owner** to the policies. Without it, the day somebody runs a script with `DATABASE_URL` the
-isolation disappears with no signal.
+the **owner** to the policies — but not here, and the difference matters. Measured against this
+repository's own container after the migration landed: as the owner, an `INSERT` with no tenant set
+still succeeds. `POSTGRES_USER` is made a superuser by initdb, and a superuser bypasses RLS
+unconditionally, which `FORCE` does not reach. So locally it buys nothing, and "somebody runs a
+script with `DATABASE_URL`" loses its isolation with or without it.
+
+It goes on for production, where a managed PostgreSQL rarely hands out a real superuser and the
+owning role therefore _is_ subject to the policies. That asymmetry has a consequence pointing the
+opposite way from the obvious reading, and it belongs in the head of whoever writes the next data
+migration: **a backfill touches every row locally and can silently touch zero in production.**
 
 ### Grants
 

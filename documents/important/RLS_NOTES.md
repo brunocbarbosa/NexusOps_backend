@@ -1,7 +1,10 @@
 # Row-Level Security
 
-> **Status: not implemented.** There is no policy, no `set_config` and no low-privilege role in the
-> code today. This document is the preparation for when that layer gets written, and it exists
+> **Status: provisioned, not enforcing.** The low-privilege role and the seven policies now exist —
+> `scripts/initdb/01-app-role.sql` and the `row_level_security` migration. What does not exist is
+> `set_config`: the application still connects with `DATABASE_URL`, as the owning superuser, which
+> bypasses every policy. So step 1 of the four below is done, step 2 is done, and steps 3 and 4 are
+> what stands between "configured" and "protecting anything". This document is the preparation for when that layer gets written, and it exists
 > because the measurements below cost real debugging time — losing them would mean paying for them
 > again.
 >

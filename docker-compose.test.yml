@@ -17,12 +17,21 @@ services:
       POSTGRES_USER: nexusops_test
       POSTGRES_PASSWORD: nexusops_test
       POSTGRES_DB: nexusops_test
+      # Read by scripts/initdb/01-app-role.sql. Hard-coded like the rest of this
+      # file, and for the same reason: CI needs these values without a secret
+      # round-trip. Must match the password in .env.test's DATABASE_URL_APP.
+      POSTGRES_APP_PASSWORD: nexusops_app_test
       # initdb refuses a data directory it did not create with 0700. A tmpfs
       # mount lands as 1777, so PGDATA points at a subdirectory that initdb
       # creates itself with the permissions it wants.
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - '5433:5432'
+    volumes:
+      # The same script the development stack mounts, so the application role is
+      # identical in both. This container is recreated on every run, so it always
+      # runs -- which is exactly why the suites can rely on the role being there.
+      - ./scripts/initdb:/docker-entrypoint-initdb.d:ro
     # No volume: the database lives in RAM and dies with the container. A test
     # run always starts from a known-empty database.
     tmpfs:

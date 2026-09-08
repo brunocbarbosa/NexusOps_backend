@@ -7,10 +7,17 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-nexusops}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexusops}
       POSTGRES_DB: ${POSTGRES_DB:-nexusops}
+      # Read by scripts/initdb/01-app-role.sql, which creates the role the
+      # application connects as. Must match the password in DATABASE_URL_APP.
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-nexusops_app}
     ports:
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Runs once, at container creation. An existing container therefore does
+      # not have the application role until `npm run infra:reset` -- which
+      # destroys local data. See documents/study/GUIA_RLS.md.
+      - ./scripts/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         [

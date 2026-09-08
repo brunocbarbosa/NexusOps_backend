@@ -386,12 +386,21 @@ jobs:
           # did not answer" rather than as the missing variable it is. Redis is
           # already up on 6380 from `npm run test:setup`, reachable because of
           # --network host.
+          #
+          # DATABASE_URL_APP is required by env.validation from the moment the
+          # RLS role exists, so it has to be here even though the runtime does
+          # not connect with it yet — without it the container exits on
+          # validation and the step reads as "the image did not answer".
+          # POSTGRES_APP_PASSWORD deliberately is *not* here: it is read by the
+          # database container, not by the application, and
+          # docker-compose.test.yml carries it.
           set -a
           . ./.env.test
           set +a
           docker run -d --rm --name nexusops-boot --network host \
             -e PORT=3000 \
             -e DATABASE_URL="$DATABASE_URL" \
+            -e DATABASE_URL_APP="$DATABASE_URL_APP" \
             -e JWT_SECRET="$JWT_SECRET" \
             -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
             -e JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \

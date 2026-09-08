@@ -269,9 +269,13 @@ including why nested access cannot be intercepted and why that hole is closed in
 is written against: the exported API, how each Prisma operation is treated, and the four schema
 requirements a new tenant-scoped model has to meet — read that one before adding a model.
 
-**RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
-the code today. Three things will bite whoever writes it, all measured here rather than read in
-documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
+**RLS is provisioned but not enforcing.** `scripts/initdb/01-app-role.sql` creates the
+`NOSUPERUSER NOBYPASSRLS` role and the `row_level_security` migration carries the seven policies,
+the grants and the default privileges — but the application still connects with `DATABASE_URL`, as
+the owning superuser, so every policy is bypassed. Switching `PrismaModule` to `DATABASE_URL_APP` is
+what turns the layer on, and it cannot be done alone: every query has to be inside a transaction
+that set the tenant first, or it silently returns nothing. Three things will bite whoever finishes
+it, all measured here rather than read in documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
 currently connects as one; setting the tenant outside an interactive `$transaction` lands on a
 different pooled connection than the query, which under concurrency serves _another tenant's_ rows;
 and a transaction-local setting never goes back to unset, so the obvious policy expression raises a

@@ -255,6 +255,24 @@ npm run prisma:migrate       # apply migrations
 npm run start:dev            # http://localhost:3000
 ```
 
+> **Upgrading an existing clone?** The database container now provisions
+> `nexusops_app`, the low-privilege role the Row-Level Security policies apply
+> to. It is created by `scripts/initdb/01-app-role.sql`, which PostgreSQL runs
+> **only when the container is first created** — so a container you already have
+> does not get it, and the RLS migration refuses to apply without it. The fix is
+> `npm run infra:reset`, which **destroys your local data**, followed by
+> `npm run prisma:migrate`. Nothing works around this: creating the role from a
+> migration would mean committing its password. The ephemeral test stack and CI
+> are unaffected, since both build the container from scratch every run.
+>
+> `.env` needs the two variables that came with it — copy them from
+> `.env.example`: `POSTGRES_APP_PASSWORD` and `DATABASE_URL_APP`. The
+> application still connects with `DATABASE_URL`; it refuses to boot if the two
+> URLs are equal, because that is RLS silently doing nothing.
+>
+> New to Row-Level Security? [`documents/study/GUIA_RLS.md`](documents/study/GUIA_RLS.md)
+> explains the whole thing from zero.
+
 Run the test suites:
 
 ```bash

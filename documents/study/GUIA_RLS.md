@@ -440,7 +440,28 @@ escritos nos arquivos continuam verdadeiros.
 
 ## 8. O que já está feito
 
-**Nenhuma linha de código.** Vale ser explícito: até aqui, o trabalho foi de projeto e medição.
+**A camada de banco existe; ela ainda não protege nada.** Vale separar as duas coisas, porque é
+fácil ler "as policies existem" e concluir que o sistema está protegido.
+
+O que passou a existir:
+
+- **O role `nexusops_app`**, `NOSUPERUSER NOBYPASSRLS`, criado pelo
+  `scripts/initdb/01-app-role.sql` que os dois compose files montam. Se
+  `POSTGRES_APP_PASSWORD` não estiver definida, o container **se recusa a subir** em vez de nascer
+  sem o role.
+- **As sete policies, os grants e os default privileges**, na migration `row_level_security`. Ela
+  também se recusa a aplicar, com uma mensagem que diz o que fazer, se o role não existir.
+- **`DATABASE_URL_APP` e `POSTGRES_APP_PASSWORD`**, e a validação que recusa as duas URLs iguais.
+
+O que **não** mudou: a aplicação continua conectando com `DATABASE_URL`, como o superusuário dono
+das tabelas. Ele ignora todas as policies. Isso é de propósito — é o que faz esta etapa não quebrar
+nada — e é também por que a camada ainda não conta.
+
+Verificado contra um stack criado do zero, como papel `nexusops_app`: fora de escopo o `SELECT`
+devolve zero linhas; dentro, só as do tenant; `INSERT` cross-tenant, `UPDATE` tirando a linha do
+tenant e `TRUNCATE` são recusados com `42501`.
+
+E antes disso, o trabalho foi de projeto e medição.
 
 - O `RLS_DESIGN.md` passou a ter **todas** as decisões fechadas — as duas que estavam em aberto e
   as duas que apareceram na revisão. A seção de decisões abertas está vazia de propósito.
@@ -459,7 +480,10 @@ testes. Tudo isso é a seção seguinte.
 
 A ordem importa: o teste vem antes do runtime, porque é o teste que prova que a camada existe.
 
-### Passo 1 — criar o role de baixo privilégio
+> Os passos 1, 2 e 3 **já estão feitos** — é o que a seção anterior descreve. Ficam aqui porque
+> explicam o que foi construído e por quê. Os passos 4, 5 e 6 é que continuam pendentes.
+
+### Passo 1 ✅ — criar o role de baixo privilégio
 
 Um arquivo `scripts/initdb/01-app-role.sql` montado em `/docker-entrypoint-initdb.d` pelos **dois**
 compose files (o de dev e o de teste), com a senha vindo de `POSTGRES_APP_PASSWORD`.
@@ -472,13 +496,13 @@ teste isso é perfeito, porque ele nasce do zero a cada execução, e a CI ganha
 > como contornar isso; é o preço de criar o role dessa forma, e as alternativas eram piores
 > (colocar `CREATE ROLE` numa migration gravaria a senha no repositório).
 
-### Passo 2 — as variáveis de ambiente
+### Passo 2 ✅ — as variáveis de ambiente
 
 `DATABASE_URL_APP` deixa de ser opcional, `POSTGRES_APP_PASSWORD` nasce, e o `env.validation.ts`
 ganha a regra de recusar as duas URLs iguais. Como sempre neste projeto, mexer numa variável são
 quatro lugares — o `GUIA_VARIAVEIS_AMBIENTE.md` lista quais.
 
-### Passo 3 — a migration com policies e grants
+### Passo 3 ✅ — a migration com policies e grants
 
 Criada com `prisma migrate dev --create-only`, porque o Prisma não modela RLS: o arquivo é escrito
 à mão. Para cada uma das sete tabelas:
@@ -496,7 +520,7 @@ Mais os `GRANT` para o role novo — e o `ALTER DEFAULT PRIVILEGES`, que é uma 
 sem ele, a **próxima** migration que criar uma tabela quebra a aplicação em produção, e nenhum teste
 pega, porque o banco de teste é construído pela mesma rodada de migrations.
 
-### Passo 4 — os testes (`test/integration/rls.int-spec.ts`)
+### Passo 4 ⏳ — os testes (`test/integration/rls.int-spec.ts`)
 
 Dez verificações. As três primeiras são baratas e só provam a **ausência** de proteção; as demais é
 que provam que ela existe:
@@ -517,13 +541,13 @@ que provam que ela existe:
 Os testes precisam de duas strings de conexão: a limpeza do banco usa `TRUNCATE`, que é um
 privilégio que o role da aplicação não tem — e não deve ter.
 
-### Passo 5 — o runtime
+### Passo 5 ⏳ — o runtime
 
 As quatro peças da seção 7: o `TenantScopeService` injetado, a transação no escopo (com o reuso e a
 restauração no aninhado), o proxy que torna `$transaction` reentrante, e os eventos adiados. Mais a
 divisão do `ensureAdminMaster`, para o bcrypt não rodar dentro da transação.
 
-### Passo 6 — medir
+### Passo 6 ⏳ — medir
 
 O `RLS_DESIGN.md` termina prometendo um número, e não uma frase: quantas conexões cada formato de
 requisição segura, e quanta concorrência o pool configurado aguenta. Segurar uma transação pela

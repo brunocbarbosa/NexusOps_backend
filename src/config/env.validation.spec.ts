@@ -5,6 +5,7 @@ describe('validateEnv', () => {
     NODE_ENV: 'test',
     PORT: '3000',
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/db?schema=public',
+    DATABASE_URL_APP: 'postgresql://app:pass@localhost:5432/db?schema=public',
     JWT_SECRET: 'a-secret-long-enough-to-pass',
     JWT_EXPIRES_IN: '15m',
     JWT_REFRESH_SECRET: 'a-different-secret-long-enough',
@@ -73,6 +74,7 @@ describe('validateEnv', () => {
 
   it.each([
     ['DATABASE_URL', 'mysql://user:pass@localhost:3306/db'],
+    ['DATABASE_URL_APP', 'mysql://app:pass@localhost:3306/db'],
     ['JWT_EXPIRES_IN', '15 minutes'],
     ['JWT_REFRESH_EXPIRES_IN', 'forever'],
     ['NODE_ENV', 'produciton'],
@@ -99,6 +101,15 @@ describe('validateEnv', () => {
       ).toThrow(/placeholder/);
     },
   );
+
+  // Two identical URLs mean the application connects as the table owner, which
+  // is a superuser here, and every RLS policy is bypassed while pg_policies
+  // still reports the setup as correct.
+  it('refuses an application URL equal to the migration URL', () => {
+    expect(() =>
+      validateEnv({ ...valid, DATABASE_URL_APP: valid.DATABASE_URL }),
+    ).toThrow(/must differ from DATABASE_URL/);
+  });
 
   // Two keys that are equal are one key, and then a refresh token valid for
   // days is accepted as a bearer token — silently, since nothing downstream
