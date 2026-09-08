@@ -5,6 +5,7 @@ import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { currentScope } from '../tenancy/tenant-context';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { fakeScope } from '../../test/utils/tenant-scope';
 
 /**
  * These tests came from `AuthService.register`, because the transaction did:
@@ -62,6 +63,7 @@ describe('CompaniesService', () => {
     service = new CompaniesService(
       prisma as unknown as ExtendedPrismaClient,
       hashing as unknown as HashingService,
+      fakeScope(),
     );
   });
 

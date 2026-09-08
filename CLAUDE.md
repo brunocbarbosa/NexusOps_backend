@@ -19,20 +19,22 @@ connect the tenancy layer to Nest at all. `src/app.*` is still the scaffold, kep
 
 The helpdesk is written: `src/tickets/` and `src/comments/` are the domain, `src/audit/` is the
 event-driven trail, `src/reports/` is the BullMQ export and `src/realtime/` is the notification
-gateway, with the event contract they share in `src/events/`. Row-Level Security is the one thing
-from the original architecture that is still missing.
+gateway, with the event contract they share in `src/events/`. Row-Level Security is in and
+enforcing: `scripts/initdb/` provisions the role the policies apply to, `src/tenancy/` opens every
+scope as a transaction that sets the tenant, and the application connects as that restricted role.
 
 Other documents, by purpose:
 
-| File                                         | Read it when                                                    |
-| -------------------------------------------- | --------------------------------------------------------------- |
-| `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec          |
-| `documents/MAIN.md`                          | you need the product scope the backend serves                   |
-| `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime        |
-| `documents/visibilidade/`                    | working on who sees which ticket, or on assignment              |
-| `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles        |
-| `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one        |
-| `documents/important/`                       | the deep references below — kept together so they stay findable |
+| File                                         | Read it when                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| `documents/MAIN_BACKEND.md`                  | implementing anything architectural — the backend spec           |
+| `documents/MAIN.md`                          | you need the product scope the backend serves                    |
+| `documents/helpdesk/`                        | working on tickets, comments, audit, reports or realtime         |
+| `documents/RLS_DESIGN.md`                    | building Row-Level Security — the settled design, roles to tests |
+| `documents/study/GUIA_RLS.md`                | you want Row-Level Security explained from first principles      |
+| `documents/study/GUIA_CI_CD.md`              | you need the CI/CD setup explained from first principles         |
+| `documents/study/GUIA_VARIAVEIS_AMBIENTE.md` | you need to know what a variable does, or are adding one         |
+| `documents/important/`                       | the deep references below — kept together so they stay findable  |
 
 `documents/important/` holds the deep references that the sections below point at rather than
 inline: `TENANCY_EXTENSION.md` (the tenancy layer, in two parts: the contract a
@@ -51,7 +53,8 @@ payloads captured from the running application, and the measured behaviour behin
 before editing `src/tickets/`, `src/comments/`, `src/audit/`, `src/reports/`, `src/realtime/` or
 `src/events/`) and `RLS_NOTES.md` (Row-Level
 Security, **not implemented yet**: the four steps that remain and how to check whether it is
-actually enforcing anything, plus the two traps measured here). They live together so that detail nobody needs today
+actually enforcing anything, plus the three traps measured here; it sends you to
+`documents/RLS_DESIGN.md` for the shape the implementation takes, where every decision is settled). They live together so that detail nobody needs today
 does not get lost.
 
 > **Before you commit:** `development` and `main` both reject direct pushes, admin included. Work
@@ -96,11 +99,14 @@ npm run prisma:reset      # drop and rebuild the database from migrations
 npm run prisma:studio
 ```
 
-Run a single unit test file or a single test by name:
+Run a single unit test file or a single test by name. **The config is not optional** — there is no
+`jest` key in `package.json` and no `jest.config.*` at the root, so a bare `npx jest` finds no
+config, falls back to babel, and dies on the first TypeScript annotation with
+`SyntaxError: Missing semicolon`, which reads like a syntax error in your own file:
 
 ```bash
-npx jest src/path/to/file.spec.ts
-npx jest -t "substring of the test name"
+npm run test:unit -- src/path/to/file.spec.ts
+npm run test:unit -- -t "substring of the test name"
 
 # The integration and e2e tiers must keep both the --experimental-vm-modules flag
 # (see "Prisma 7 wiring" below) and DOTENV_CONFIG_PATH, or they will run against
@@ -242,8 +248,10 @@ redundant:
    `tenant_id` for the lifetime of a request. A Prisma Client Extension reads it and injects the
    tenant filter into every query. This is why the tenant filter must never be written by hand in
    a service — a hand-written query is a query that can be wrong.
-2. PostgreSQL native Row-Level Security as the backstop, in case the extension is bypassed
-   (raw SQL, a mistake in the extension itself).
+2. PostgreSQL native Row-Level Security as the backstop, for when the extension is bypassed
+   (raw SQL, a mistake in the extension itself). It is on: the application connects as
+   `nexusops_app`, which cannot bypass a policy, so a query made outside a scope returns **zero
+   rows** rather than another tenant's.
 
 The critical consequence: **BullMQ workers and WebSocket handlers have no HTTP request**, so the
 `AsyncLocalStorage` context is empty there. Tenant identity must be carried explicitly in the job
@@ -258,6 +266,18 @@ everywhere in the codebase:
 - **Never reach for a `currentTenantId(): string | undefined`.** It does not exist on purpose,
   because `?? fallback` is exactly the silent bypass this design prevents. Use `requireTenantId()`,
   which returns a string or throws, and `runWithoutTenant()` when a read genuinely must be unscoped.
+- **Opening a scope is a method on an injected `TenantScopeService`, not a free function.** A scope
+  is a database transaction now — it sets `app.tenant_id` on one connection and a proxy over the
+  client keeps the queries on it. `src/tenancy/tenant-context.ts` keeps only the readers.
+- **Recover from a database error through `scope.attempt()`, never around it.** A failed statement
+  aborts the whole transaction, so a `catch` that queries afterwards gets `25P02`. `attempt()` runs
+  its body inside a `SAVEPOINT` so the transaction survives.
+- **A scope that throws rolls back everything it wrote.** That is right for a mutation and wrong for
+  a write made _because_ the request is being rejected — `AuthService.refresh()` revoking a replayed
+  token family is the case. Return a verdict from the scope and throw outside it.
+- **Domain events go through `DomainEvents`, not `EventEmitter2`.** It queues while a transaction is
+  open and releases after the commit, so a rolled-back mutation announces nothing and a listener can
+  read what it was told about.
 
 The extension's measured behaviour against Prisma 7.10.0 — five findings the design depends on,
 including why nested access cannot be intercepted and why that hole is closed in the schema instead
@@ -266,13 +286,20 @@ including why nested access cannot be intercepted and why that hole is closed in
 is written against: the exported API, how each Prisma operation is treated, and the four schema
 requirements a new tenant-scoped model has to meet — read that one before adding a model.
 
-**RLS is not implemented yet** — there is no policy, no `set_config` and no low-privilege role in
-the code today. Two things will bite whoever writes it, both measured here rather than read in
+**RLS is implemented and enforcing.** `scripts/initdb/01-app-role.sql` creates the
+`NOSUPERUSER NOBYPASSRLS` role, the `row_level_security` migration carries the seven policies, the
+grants and the default privileges, and `PrismaModule` connects with `DATABASE_URL_APP` — so the
+application is subject to them. A query made outside a scope returns zero rows rather than another
+tenant's. Three things bite whoever touches this layer, all measured here rather than read in
 documentation: a superuser bypasses RLS unconditionally and `FORCE` does not help, and the app
-currently connects as one; and setting the tenant outside an interactive `$transaction` lands on a
-different pooled connection than the query, which under concurrency serves _another tenant's_ rows.
-The measurements, the four steps that remain and the queries that tell you whether the layer is
-enforcing anything are in **`documents/important/RLS_NOTES.md`**.
+currently connects as one; setting the tenant outside an interactive `$transaction` lands on a
+different pooled connection than the query, which under concurrency serves _another tenant's_ rows;
+and a transaction-local setting never goes back to unset, so the obvious policy expression raises a
+cast error instead of returning nothing, on a recycled connection only. The measurements, the four
+steps that remain and the queries that tell you whether the layer is enforcing anything are in
+**`documents/important/RLS_NOTES.md`**; the shape the implementation takes — the roles, the
+policies, where the transaction is opened, and the six settled decisions behind all of it — is in
+**`documents/RLS_DESIGN.md`**.
 
 **Authentication, and the request-scoped tenant.** `src/auth/` is what turns the tenancy layer
 from measured code into code that runs on every request. `TenantContextInterceptor` (registered in

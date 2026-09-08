@@ -6,9 +6,10 @@ import {
   requireTenantId,
 } from './tenant-context';
 import { TenantContextInterceptor } from './tenant-context.interceptor';
+import { fakeScope } from '../../test/utils/tenant-scope';
 
 describe('TenantContextInterceptor', () => {
-  const interceptor = new TenantContextInterceptor();
+  const interceptor = new TenantContextInterceptor(fakeScope());
 
   const httpContext = (user?: unknown): ExecutionContext =>
     ({

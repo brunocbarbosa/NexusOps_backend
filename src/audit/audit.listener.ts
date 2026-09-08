@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { runWithTenant } from '../tenancy/tenant-context';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import { TICKET_EVENT_PATTERN } from '../events/ticket-events';
 import type { TicketEvent } from '../events/ticket-events';
 import { AuditService } from './audit.service';
@@ -29,7 +29,9 @@ export class AuditListener {
   @OnEvent(TICKET_EVENT_PATTERN)
   async handle(event: TicketEvent): Promise<void> {
     try {
-      await runWithTenant(event.tenantId, () => this.audit.record(event));
+      await this.scope.runWithTenant(event.tenantId, () =>
+        this.audit.record(event),
+      );
     } catch (error) {
       this.logger.error(
         `Failed to record ${event.action} on ${event.entityType} ` +
@@ -40,5 +42,8 @@ export class AuditListener {
     }
   }
 
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly scope: TenantScopeService,
+  ) {}
 }

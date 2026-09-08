@@ -10,7 +10,9 @@ import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import {
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  useScope,
+} from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { UsersModule } from '../../src/users/users.module';
 import { UsersService } from '../../src/users/users.service';
 
@@ -60,6 +62,7 @@ describe('UsersService across tenants', () => {
         UsersModule,
       ],
     }).compile();
+    useScope(mod.get(TenantScopeService));
     await mod.init();
 
     users = mod.get(UsersService);

@@ -13,7 +13,9 @@ import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import {
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  useScope,
+} from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { CrossTenantWriteError } from '../../src/tenancy/tenant-extension';
 import { tenantScoped } from '../../src/tenancy/tenant-scoped';
 
@@ -56,6 +58,7 @@ describe('company creation inside a scope-changing transaction', () => {
         PlatformModule,
       ],
     }).compile();
+    useScope(mod.get(TenantScopeService));
     // init(), not compile() alone: HashingService builds its decoy hash in
     // onModuleInit, and the login paths would otherwise compare against
     // undefined.

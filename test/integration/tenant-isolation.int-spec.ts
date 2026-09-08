@@ -5,11 +5,13 @@ import {
   CrossTenantWriteError,
   tenantIsolationExtension,
 } from '../../src/tenancy/tenant-extension';
+import { TenantContextMissingError } from '../../src/tenancy/tenant-context';
 import {
-  TenantContextMissingError,
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  scopeFor,
+  useScope,
+} from '../utils/tenant-scope';
 
 // What the domain schema does and does not guarantee on its own.
 //
@@ -160,6 +162,10 @@ describe('tenant isolation (extension)', () => {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
   const base = new PrismaClient({ adapter });
   const prisma = base.$extends(tenantIsolationExtension);
+
+  // Scopes run on the extended client this describe is about, not on a client
+  // the helper built for itself.
+  useScope(scopeFor(prisma));
 
   const run = randomUUID();
   let tenantA: string;

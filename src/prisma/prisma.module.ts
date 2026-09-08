@@ -1,5 +1,6 @@
 import { Inject, Module, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import { PRISMA, createPrismaClient } from './prisma.client';
 // `import type` is required: the constructor below is decorated, and with
 // isolatedModules + emitDecoratorMetadata a value import of a type-only symbol
@@ -7,12 +8,23 @@ import { PRISMA, createPrismaClient } from './prisma.client';
 import type { ExtendedPrismaClient } from './prisma.client';
 
 /**
- * Provides the tenant-scoped Prisma client under the `PRISMA` token.
+ * Provides the tenant-scoped Prisma client under the `PRISMA` token, and the two
+ * providers that open a scope on it.
  *
  * Deliberately not `@Global()`. Making it global would save an import line per
  * feature module and cost the ability to read a module's dependencies off its
  * `imports` array — and "which modules touch the database" is exactly the
  * question worth being able to answer by looking.
+ *
+ * `TenantScopeService` lives here rather than in a module of its own, and it is
+ * a trade worth naming: it is not about Prisma, but it needs the client, every
+ * feature module already imports this module, and a separate `TenancyModule`
+ * would add an import line to eight modules to express something their
+ * `PrismaModule` import already implies — that they reach the database, and
+ * therefore reach it inside a scope.
+ *
+ * `DomainEvents` deliberately does **not** live here; see
+ * `src/tenancy/domain-events.module.ts` for why.
  *
  * The module class, not a provider, owns the shutdown: the provider is a Prisma
  * proxy, and Nest only calls lifecycle hooks on instances that actually declare
@@ -25,12 +37,24 @@ import type { ExtendedPrismaClient } from './prisma.client';
       provide: PRISMA,
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
+        // `DATABASE_URL_APP`, not `DATABASE_URL`: the application connects as
+        // `nexusops_app`, a NOSUPERUSER NOBYPASSRLS role that owns no table, so
+        // the Row-Level Security policies actually apply to it. `DATABASE_URL`
+        // stays the owner and keeps running the migrations and the suites'
+        // TRUNCATE. validateEnv refuses a configuration where the two are equal,
+        // because that is not a misconfiguration that announces itself — it is
+        // RLS quietly enforcing nothing.
+        //
         // getOrThrow rather than get: validateEnv already guarantees the value,
         // and `get` would type it as possibly-undefined for no reason.
-        createPrismaClient(config.getOrThrow<string>('DATABASE_URL')),
+        createPrismaClient(
+          config.getOrThrow<string>('DATABASE_URL_APP'),
+          config.getOrThrow<number>('DATABASE_POOL_MAX'),
+        ),
     },
+    TenantScopeService,
   ],
-  exports: [PRISMA],
+  exports: [PRISMA, TenantScopeService],
 })
 export class PrismaModule implements OnModuleDestroy {
   constructor(@Inject(PRISMA) private readonly prisma: ExtendedPrismaClient) {}

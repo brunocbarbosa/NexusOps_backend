@@ -9,7 +9,7 @@ import { Prisma, Tenant } from '../generated/prisma/client';
 import { UserRole } from '../generated/prisma/enums';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant, runWithoutTenant } from '../tenancy/tenant-context';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import { tenantScoped } from '../tenancy/tenant-scoped';
 import { UserResponse, toUserResponse } from '../users/user-response';
 import { CompanyResponse, toCompanyResponse } from './company-response';
@@ -30,7 +30,7 @@ export type CompanyWithAdmin = {
 /**
  * The ADMIN_MASTER's view of the customer companies.
  *
- * Every query here runs inside `runWithoutTenant()`, and that is not a
+ * Every query here runs inside `this.scope.runWithoutTenant()`, and that is not a
  * convenience: `Tenant` is the one model in `TENANT_AGNOSTIC`, and under a
  * tenant scope the extension rewrites a `Tenant` read to `where.id = <current
  * tenant>` — which for the ADMIN_MASTER would return the platform row and
@@ -45,6 +45,7 @@ export class CompaniesService {
   constructor(
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
     private readonly hashing: HashingService,
+    private readonly scope: TenantScopeService,
   ) {}
 
   /**
@@ -64,13 +65,13 @@ export class CompaniesService {
     const passwordHash = await this.hashing.hash(dto.admin.password);
 
     try {
-      return await runWithoutTenant(() =>
+      return await this.scope.runWithoutTenant(() =>
         this.prisma.$transaction(async (tx) => {
           const tenant = await tx.tenant.create({
             data: { name: dto.name, domain: dto.domain },
           });
 
-          const admin = await runWithTenant(tenant.id, async () => {
+          const admin = await this.scope.runWithTenant(tenant.id, async () => {
             // The row the ticket sequence increments. Created with the company
             // rather than upserted when the first ticket is opened: two
             // concurrent first opens would both find it missing, both insert,
@@ -124,7 +125,7 @@ export class CompaniesService {
 
     // One round trip for both halves, so a concurrent write cannot land between
     // them and return a total that does not match the page.
-    const [total, tenants] = await runWithoutTenant(() =>
+    const [total, tenants] = await this.scope.runWithoutTenant(() =>
       this.prisma.$transaction([
         this.prisma.tenant.count({ where }),
         this.prisma.tenant.findMany({
@@ -155,7 +156,7 @@ export class CompaniesService {
     const company = await this.requireCompany(id);
 
     try {
-      const updated = await runWithoutTenant(() =>
+      const updated = await this.scope.runWithoutTenant(() =>
         this.prisma.tenant.update({
           where: { id: company.id },
           data: { name: dto.name, domain: dto.domain, isActive: dto.isActive },
@@ -189,7 +190,7 @@ export class CompaniesService {
   async remove(id: string): Promise<void> {
     const company = await this.requireCompany(id);
 
-    await runWithoutTenant(() =>
+    await this.scope.runWithoutTenant(() =>
       this.prisma.tenant.delete({ where: { id: company.id } }),
     );
   }
@@ -200,7 +201,7 @@ export class CompaniesService {
    * The chokepoint of every nested route. Two distinct things would break
    * without it, and only the first is obvious:
    *
-   * `runWithTenant()` accepts any non-empty string, so an id that belongs to no
+   * `this.scope.runWithTenant()` accepts any non-empty string, so an id that belongs to no
    * company would open a scope over nothing and `GET .../users` would answer an
    * empty page — "this company has no users" instead of "there is no such
    * company".
@@ -211,7 +212,7 @@ export class CompaniesService {
    * no way to mint another except by rebooting.
    */
   async requireCompany(id: string): Promise<Tenant> {
-    const tenant = await runWithoutTenant(() =>
+    const tenant = await this.scope.runWithoutTenant(() =>
       this.prisma.tenant.findUnique({ where: { id } }),
     );
 

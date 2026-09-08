@@ -4,7 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant } from '../tenancy/tenant-context';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import type {
   AccessTokenPayload,
   AuthenticatedUser,
@@ -15,6 +15,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
+    private readonly scope: TenantScopeService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -41,7 +42,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * the request path that establishes a tenant scope for itself.
    */
   async validate(payload: AccessTokenPayload): Promise<AuthenticatedUser> {
-    const user = await runWithTenant(payload.tenantId, () =>
+    const user = await this.scope.runWithTenant(payload.tenantId, () =>
       this.prisma.user.findUnique({ where: { id: payload.sub } }),
     );
 

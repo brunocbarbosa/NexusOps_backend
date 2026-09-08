@@ -10,6 +10,8 @@
 > Documentos vizinhos, com propósitos diferentes:
 >
 > - [`GUIA_CI_CD.md`](./GUIA_CI_CD.md) — o mesmo tratamento didático, para a esteira de CI/CD.
+> - [`GUIA_RLS.md`](./GUIA_RLS.md) — o mesmo tratamento didático, para o Row-Level Security, que é de
+>   onde vêm `DATABASE_URL_APP` e `POSTGRES_APP_PASSWORD`.
 > - [`../important/USERS.md`](../important/USERS.md) — o porquê medido das decisões de autenticação,
 >   incluindo por que existem duas chaves JWT.
 > - [`../../CLAUDE.md`](../../CLAUDE.md) — a referência curta e operacional.
@@ -167,20 +169,21 @@ legal.
 
 ### PostgreSQL
 
-| Variável            | Validada | Quem lê                                  |
-| ------------------- | -------- | ---------------------------------------- |
-| `POSTGRES_USER`     | ❌       | só o `docker-compose.yml`                |
-| `POSTGRES_PASSWORD` | ❌       | só o `docker-compose.yml`                |
-| `POSTGRES_DB`       | ❌       | só o `docker-compose.yml`                |
-| `POSTGRES_PORT`     | ❌       | só o `docker-compose.yml`                |
-| `DATABASE_URL`      | ✅       | `prisma.config.ts` e o `PrismaModule`    |
-| `DATABASE_URL_APP`  | ❌       | **ninguém ainda** — reservada para a RLS |
+| Variável                | Validada | Quem lê                                            |
+| ----------------------- | -------- | -------------------------------------------------- |
+| `POSTGRES_USER`         | ❌       | só o `docker-compose.yml`                          |
+| `POSTGRES_PASSWORD`     | ❌       | só o `docker-compose.yml`                          |
+| `POSTGRES_DB`           | ❌       | só o `docker-compose.yml`                          |
+| `POSTGRES_PORT`         | ❌       | só o `docker-compose.yml`                          |
+| `POSTGRES_APP_PASSWORD` | ❌       | só o `docker-compose.yml`, via `scripts/initdb/`   |
+| `DATABASE_URL`          | ✅       | `prisma.config.ts` e as suítes que limpam o banco  |
+| `DATABASE_URL_APP`      | ✅       | o `PrismaModule` — é com esta que a aplicação roda |
+| `DATABASE_POOL_MAX`     | ✅       | o `PrismaModule`                                   |
 
-As quatro `POSTGRES_*` configuram o **container**: com que usuário, senha e banco o PostgreSQL vai
-subir, e em que porta do host ele aparece. Elas **não chegam na aplicação** — o Prisma não sabe que
-existem.
+As `POSTGRES_*` configuram o **container**: com que usuário, senha e banco o PostgreSQL vai subir, e
+em que porta do host ele aparece. Elas **não chegam na aplicação** — o Prisma não sabe que existem.
 
-A `DATABASE_URL` é o que a aplicação de fato usa, e ela repete os mesmos dados em outro formato:
+A `DATABASE_URL` repete os mesmos dados em outro formato:
 
 ```
 postgresql://nexusops:nexusops@localhost:5432/nexusops?schema=public
@@ -194,11 +197,46 @@ da seção 5.
 A validação da `DATABASE_URL` só confere o esquema (`postgresql://`). Ir mais fundo duplicaria o que
 o driver `pg` já faz e recusaria URLs válidas — socket unix, parâmetros extras.
 
-**`DATABASE_URL_APP`** está comentada e não é lida por nada hoje. Ela é a preparação para o
-Row-Level Security: um superusuário **ignora** as policies de RLS incondicionalmente, e o dono da
-tabela também — então a aplicação vai precisar conectar com um papel restrito, diferente do que roda
-as migrations. Enquanto a camada de RLS não existir, ela fica comentada. Ver
-[`../important/RLS_NOTES.md`](../important/RLS_NOTES.md).
+#### Duas URLs, e por quê
+
+Este é o ponto que confunde quem chega: **existem duas conexões, com dois usuários diferentes, e
+isso é de propósito.**
+
+- **`DATABASE_URL`** é o dono das tabelas — `nexusops`, que o `initdb` cria como **superusuário**.
+  Ela roda as migrations, o Prisma Studio, e o `TRUNCATE` com que as suítes limpam o banco.
+- **`DATABASE_URL_APP`** é a aplicação — `nexusops_app`, criado por
+  `scripts/initdb/01-app-role.sql` como `NOSUPERUSER NOBYPASSRLS` e sem posse de tabela nenhuma.
+
+A razão é o Row-Level Security: **um superusuário ignora as policies incondicionalmente**, e o dono
+da tabela também. Se a aplicação conectasse com a `DATABASE_URL`, todas as policies existiriam e
+nenhuma valeria — e o `pg_policies` mostraria tudo certo. Ver
+[`GUIA_RLS.md`](./GUIA_RLS.md).
+
+**A aplicação se recusa a subir se as duas forem iguais.** Não é preciosismo: duas URLs iguais não é
+um erro que grita, é o RLS silenciosamente desligado — a mesma lógica das duas chaves JWT.
+
+**`POSTGRES_APP_PASSWORD`** é a senha desse papel, lida pelo script de initdb quando o container é
+**criado**. Ela precisa bater com a senha dentro da `DATABASE_URL_APP` — é a armadilha nº 1 de novo,
+com outros nomes. E ela tem uma pegadinha própria: o `/docker-entrypoint-initdb.d` roda **uma única
+vez, na criação do container**. Um container que você já tem não ganha o papel; para isso é
+`npm run infra:reset`, que **apaga os dados locais**.
+
+#### `DATABASE_POOL_MAX`
+
+Quantas conexões a aplicação pode segurar ao mesmo tempo. Parece afinação de performance e não é —
+sob RLS, **um escopo é uma transação, e uma transação prende uma conexão pelo tempo da requisição
+inteira**. Então este número é o teto de **requisições concorrentes**, não de queries concorrentes.
+
+A requisição de número `DATABASE_POOL_MAX + 1` não falha: ela espera por uma conexão, e desiste
+depois de 5 segundos se nenhuma liberar.
+
+Medido: vinte escopos simultâneos estabilizam em exatamente este número de conexões. O default do
+driver `pg` é 10, e é justamente por isso que a variável é obrigatória e não tem default aqui — um
+teto que ninguém escolheu é um teto que ninguém conhece. Em produção o número que importa é este
+**vezes o número de instâncias**, pesado contra o `max_connections` do servidor.
+
+O `.env.test` usa 25, e o motivo está escrito lá: `ticket-numbering.int-spec.ts` abre 20 escopos de
+uma vez, e cada um segura uma conexão enquanto espera o lock da linha do contador de chamados.
 
 ### Redis
 

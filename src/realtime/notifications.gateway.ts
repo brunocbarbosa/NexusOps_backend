@@ -17,7 +17,7 @@ import {
 import type { TicketEvent } from '../events/ticket-events';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant } from '../tenancy/tenant-context';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import { adminRoom, joinsAdminRoom, userRoom } from './rooms';
 
 /**
@@ -47,6 +47,7 @@ export class NotificationsGateway implements OnGatewayConnection {
   constructor(
     private readonly jwt: JwtService,
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
+    private readonly scope: TenantScopeService,
   ) {}
 
   /**
@@ -78,7 +79,7 @@ export class NotificationsGateway implements OnGatewayConnection {
       return this.reject(client, 'invalid token');
     }
 
-    const user = await runWithTenant(payload.tenantId, () =>
+    const user = await this.scope.runWithTenant(payload.tenantId, () =>
       this.prisma.user.findUnique({ where: { id: payload.sub } }),
     );
 

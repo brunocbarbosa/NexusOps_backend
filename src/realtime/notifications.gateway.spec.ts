@@ -1,4 +1,5 @@
 import { JwtService } from '@nestjs/jwt';
+import { fakeScope } from '../../test/utils/tenant-scope';
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../events/ticket-events';
 import type { TicketEvent } from '../events/ticket-events';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
@@ -46,6 +47,7 @@ describe('NotificationsGateway fan-out', () => {
     gateway = new NotificationsGateway(
       {} as unknown as JwtService,
       {} as unknown as ExtendedPrismaClient,
+      fakeScope(),
     );
     Object.defineProperty(gateway, 'server', { value: { to } });
   });

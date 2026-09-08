@@ -9,7 +9,8 @@ import {
 } from '../../src/generated/prisma/enums';
 import { PRISMA } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
-import { runWithoutTenant } from '../../src/tenancy/tenant-context';
+import { runWithoutTenant, useScope } from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { createTestApp } from '../utils/create-test-app';
 import {
   FIXTURE_PASSWORD,
@@ -115,6 +116,7 @@ describe('Reports (e2e)', () => {
   beforeAll(async () => {
     app = (await createTestApp()) as INestApplication<App>;
     prisma = app.get<ExtendedPrismaClient>(PRISMA);
+    useScope(app.get(TenantScopeService));
     operator = await loginAsAdminMaster(app);
 
     const a = await newTenant('a');

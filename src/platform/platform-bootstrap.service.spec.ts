@@ -6,6 +6,7 @@ import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { currentScope } from '../tenancy/tenant-context';
 import { PlatformBootstrapService } from './platform-bootstrap.service';
 import { PLATFORM_TENANT_DOMAIN } from './platform.constants';
+import { fakeScope } from '../../test/utils/tenant-scope';
 
 /**
  * The bootstrap is the entire lifecycle of the ADMIN_MASTER: no route assigns
@@ -64,6 +65,7 @@ describe('PlatformBootstrapService', () => {
       prisma as unknown as ExtendedPrismaClient,
       hashing as unknown as HashingService,
       { getOrThrow: (key: string) => env[key] } as unknown as ConfigService,
+      fakeScope(),
     );
   });
 

@@ -52,6 +52,35 @@ export class EnvironmentVariables {
   })
   DATABASE_URL: string;
 
+  // The connection the application itself uses: a NOSUPERUSER NOBYPASSRLS role
+  // that does not own the tables, so the RLS policies apply to it. `DATABASE_URL`
+  // above stays the owner and keeps running the migrations.
+  //
+  // Required rather than optional, and required from the moment the role exists
+  // rather than from the moment the runtime starts using it: an environment that
+  // is missing it would otherwise be discovered by the deploy that switches over,
+  // which is the worst moment to find out.
+  @Matches(/^postgres(ql)?:\/\//, {
+    message: 'DATABASE_URL_APP must be a postgresql:// connection string',
+  })
+  DATABASE_URL_APP: string;
+
+  // How many connections the application may hold at once. Under Row-Level
+  // Security a scope is a transaction and a transaction pins a connection for
+  // the length of the request that opened it, so this is the ceiling on
+  // concurrent requests, not on concurrent queries — request N+1 waits for a
+  // connection and gives up after the scope's 5s `maxWait`.
+  //
+  // Required, and with no default on purpose: `pg` has one (10), and a ceiling
+  // nobody chose is a ceiling nobody knows. The number that matters in
+  // production is this times the number of instances, against the server's
+  // `max_connections` — which is why the bound below is loose: only the
+  // deployment knows what is too many.
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  DATABASE_POOL_MAX: number;
+
   @IsString()
   @MinLength(16, {
     message:
@@ -185,6 +214,21 @@ export function validateEnv(
           'public, and it guards the account that creates every company',
       );
     }
+  }
+
+  // Same shape as the JWT check below, and for the same reason. If the two URLs
+  // match, the application connects as the owning superuser, every policy is
+  // bypassed, and `pg_policies` still reports the setup as correct -- a silent
+  // failure that looks exactly like protection. Measured, see RLS_NOTES.md.
+  if (
+    validated.DATABASE_URL &&
+    validated.DATABASE_URL === validated.DATABASE_URL_APP
+  ) {
+    problems.push(
+      '  - DATABASE_URL_APP: must differ from DATABASE_URL. They are the same ' +
+        'connection, so the application would connect as the table owner and ' +
+        'every Row-Level Security policy would be bypassed in silence',
+    );
   }
 
   // Setting both to the same value silently undoes the separation the two keys

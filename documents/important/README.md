@@ -16,7 +16,7 @@ in `documents/`; execution records (plan, checklist) do too.
 | [`USERS.md`](./USERS.md)                         | touching `src/auth/`, `src/users/`, or a DTO in any module                                               |
 | [`PLATFORM.md`](./PLATFORM.md)                   | touching `src/platform/`, or integrating a platform console                                              |
 | [`HELPDESK.md`](./HELPDESK.md)                   | touching `src/tickets/`, `src/comments/`, `src/audit/`, `src/reports/`, `src/realtime/` or `src/events/` |
-| [`RLS_NOTES.md`](./RLS_NOTES.md)                 | implementing Row-Level Security — which **does not exist yet** in the code                               |
+| [`RLS_NOTES.md`](./RLS_NOTES.md)                 | touching Row-Level Security — the policies, the application role, or the scope transaction               |
 
 All of them were measured against this repository's versions — Prisma 7.10.0, PostgreSQL 17, bcrypt
 6.0.0, class-transformer 0.5.1, BullMQ 6.2.0, `@nestjs/event-emitter` 3.1.0 and `pg` 8.23 — not

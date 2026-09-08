@@ -26,6 +26,13 @@ cp .env.example .env.local                   # NEXUSOPS_API_URL=http://localhost
 npm run dev                                  # http://localhost:3000
 ```
 
+> **Se faz tempo que você não atualiza o backend, ele não vai subir.** O Row-Level Security entrou, e
+> com ele três variáveis novas — `DATABASE_URL_APP`, `POSTGRES_APP_PASSWORD` e `DATABASE_POOL_MAX` —
+> que o backend valida no boot e sem as quais ele se recusa a iniciar. Copie-as do `.env.example`
+> dele. E o container de banco que você já tem **não** possui o papel restrito que a aplicação passou
+> a usar: para criá-lo é `npm run infra:reset`, que **apaga os dados locais** — inclusive as empresas
+> que você criou em roteiros anteriores. O README do backend tem o passo a passo.
+
 `npm run dev` serve o desenvolvimento. Para exercitar exatamente o que a imagem Docker roda:
 `npm run build && NEXUSOPS_API_URL=http://localhost:3333 npm run start:standalone`.
 

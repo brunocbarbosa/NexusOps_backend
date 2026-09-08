@@ -11,7 +11,9 @@ import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import {
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  useScope,
+} from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { tenantScoped } from '../../src/tenancy/tenant-scoped';
 import { TicketsModule } from '../../src/tickets/tickets.module';
 import { TicketsService } from '../../src/tickets/tickets.service';
@@ -87,6 +89,7 @@ describe('TicketsService across tenants and requesters', () => {
         TicketsModule,
       ],
     }).compile();
+    useScope(mod.get(TenantScopeService));
     await mod.init();
 
     tickets = mod.get(TicketsService);

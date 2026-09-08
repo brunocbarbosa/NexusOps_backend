@@ -1,9 +1,21 @@
 # Row-Level Security
 
-> **Status: not implemented.** There is no policy, no `set_config` and no low-privilege role in the
-> code today. This document is the preparation for when that layer gets written, and it exists
+> **Status: implemented and enforcing.** All four steps below are done. The application connects as
+> `nexusops_app` — measured, `rolsuper` and `rolbypassrls` both false — every scope sets the tenant
+> inside an interactive transaction, and a query made outside a scope returns zero rows rather than
+> another tenant's. The measurements in Part II are what the implementation was built against, and
+> they are why the layer works rather than merely existing; they are kept because a Prisma or
+> PostgreSQL upgrade can take any of them away silently. This document is the preparation for when that layer gets written, and it exists
 > because the measurements below cost real debugging time — losing them would mean paying for them
 > again.
+>
+> Never seen RLS before? [`../study/GUIA_RLS.md`](../study/GUIA_RLS.md) teaches it from zero, in
+> Portuguese, and is the gentler way in.
+>
+> **Read [`../RLS_DESIGN.md`](../RLS_DESIGN.md) before building any of it.** This document says why
+> the layer exists and what it must survive; that one says what shape it takes, and every decision
+> in it is settled. The four steps below are still the right four, but each has detail there that
+> they do not carry — step 2 in particular, where the obvious policy expression is wrong.
 
 Two parts, as with the other references here, though the split lands differently because there is
 nothing to integrate against yet.
@@ -12,7 +24,7 @@ nothing to integrate against yet.
 tell whether it is actually doing anything once built. It is what someone picking up this task
 needs, and it is deliberately first.
 
-**Part II is the measured behaviour**: two traps that were measured against this repository's own
+**Part II is the measured behaviour**: three traps that were measured against this repository's own
 container and that will otherwise be rediscovered the expensive way.
 
 ---
@@ -32,12 +44,20 @@ reach.
 
 ### The four steps
 
+All four are done. They are kept in the imperative because they are also the checklist for
+provisioning a new environment, and because each one names what breaks without it.
+
 1. **Provision a `NOSUPERUSER NOBYPASSRLS` role that does not own the tables**, with DML only.
    `.env.example` already reserves `DATABASE_URL_APP` for it; migrations keep using the owning
    role. Without this step every other step is decoration — see Part II.
-2. **Create the policies** and apply `ALTER TABLE ... FORCE ROW LEVEL SECURITY`. Five tables need
-   them: `users`, `tickets`, `comments`, `audit_logs`, `refresh_tokens`. `tenants` is the tenant
-   rather than being scoped by one, and `_prisma_migrations` is not application data.
+2. **Create the policies** and apply `ALTER TABLE ... FORCE ROW LEVEL SECURITY`. **Seven** tables
+   need them: `users`, `tickets`, `comments`, `audit_logs`, `refresh_tokens`, `ticket_counters` and
+   `reports` — the last two arrived with the helpdesk slice, after an earlier version of this list
+   was written, and both carry `tenant_id` and are scoped by the extension exactly like the others.
+   `tenants` is the tenant rather than being scoped by one, and `_prisma_migrations` is not
+   application data. Write the comparison as
+   `tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid`; without the `nullif` the
+   policy raises an error instead of returning nothing, for the reason in Part II.
 3. **Set the tenant with `set_config('app.tenant_id', $1, true)`** inside an **interactive**
    `$transaction(async (tx) => ...)`. Not `SET`, and not outside a transaction — both fail, in
    different and non-obvious ways described in Part II.
@@ -95,7 +115,7 @@ quickly, which is the failure this layer is prone to.
 
 ## Part II — measured behaviour
 
-Both of the following were measured against this repository's own container, not taken from
+All three of the following were measured against this repository's own container, not taken from
 documentation.
 
 ### A superuser bypasses RLS, and `FORCE` does not help
@@ -132,4 +152,31 @@ Two traps:
 
 So the tenant must be set with `set_config('app.tenant_id', $1, true)` — the third argument is
 `is_local` — inside an **interactive** `$transaction(async (tx) => ...)`, which pins one connection
-and resets the value at commit. The array form of `$transaction` does not give that guarantee.
+and takes the value out of scope at commit. The array form of `$transaction` does not give that
+guarantee. "Out of scope" is not "back to unset", and the difference is the third trap.
+
+### A transaction-local setting does not go back to unset
+
+Once a connection has served one scoped transaction, `current_setting('app.tenant_id', true)` on it
+returns the **empty string** rather than NULL, forever after. There is no way back: passing NULL to
+`set_config` writes `''` too. Measured against this repository's container, PostgreSQL 17.11:
+
+| the connection                    | `current_setting('app.tenant_id', true)` |
+| --------------------------------- | ---------------------------------------- |
+| fresh                             | `NULL`                                   |
+| has served one scoped transaction | `''`                                     |
+
+This matters because the obvious policy expression is
+`tenant_id = current_setting('app.tenant_id', true)::uuid`, and `''::uuid` does not evaluate to
+NULL — it raises `22P02 invalid input syntax for type uuid: ""`. So a query made outside any scope
+returns zero rows on a connection the pool has not used yet and **errors** on one it has, which is
+the opposite of the fail-closed behaviour the whole design leans on. Worse, a test written against a
+freshly built pool passes.
+
+`nullif(current_setting('app.tenant_id', true), '')::uuid` restores it: measured, zero rows on a
+`SELECT` and `42501` on an `INSERT`, on a fresh connection and a recycled one alike.
+
+One more thing that follows, and is easy to get wrong when writing the tests: **`42501` aborts the
+transaction like any other error.** A test that asserts a refusal and then keeps using the same
+transaction gets `25P02 current transaction is aborted` on everything after it. Take expected
+refusals inside a `SAVEPOINT`.

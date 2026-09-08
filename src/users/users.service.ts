@@ -12,6 +12,7 @@ import { RefreshTokenService } from '../auth/refresh-token.service';
 import { Prisma, User } from '../generated/prisma/client';
 import { UserRole } from '../generated/prisma/enums';
 import { PRISMA } from '../prisma/prisma.client';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
 import { tenantScoped } from '../tenancy/tenant-scoped';
 import { administersUsers } from './administers-users';
@@ -45,19 +46,26 @@ export class UsersService {
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
     private readonly hashing: HashingService,
     private readonly refreshTokens: RefreshTokenService,
+    private readonly scope: TenantScopeService,
   ) {}
 
   async create(dto: CreateUserDto): Promise<UserResponse> {
     const passwordHash = await this.hashing.hash(dto.password);
 
     try {
-      const user = await this.prisma.user.create({
-        data: tenantScoped({
-          email: dto.email,
-          passwordHash,
-          role: dto.role ?? UserRole.REQUESTER,
+      // Through `attempt()`, because the catch below asks the database a
+      // question. A unique violation aborts the transaction, and a request is
+      // one transaction now, so without the savepoint that question comes back
+      // `25P02` instead of an answer.
+      const user = await this.scope.attempt(() =>
+        this.prisma.user.create({
+          data: tenantScoped({
+            email: dto.email,
+            passwordHash,
+            role: dto.role ?? UserRole.REQUESTER,
+          }),
         }),
-      });
+      );
       return toUserResponse(user);
     } catch (error) {
       if (!isUniqueViolation(error)) {

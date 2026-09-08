@@ -11,6 +11,8 @@
 >
 > - [`GUIA_VARIAVEIS_AMBIENTE.md`](./GUIA_VARIAVEIS_AMBIENTE.md) — o mesmo tratamento didático, para
 >   as variáveis de ambiente: o que cada uma faz e quem a lê.
+> - [`GUIA_RLS.md`](./GUIA_RLS.md) — o mesmo tratamento didático, para o Row-Level Security: o que é,
+>   o que já foi decidido e o que falta construir.
 > - [`important/`](../important/) — as referências profundas: o comportamento medido da extensão de
 >   tenancy e as notas de RLS.
 > - [`../../CLAUDE.md`](../../CLAUDE.md) — a referência curta e operacional, para consulta rápida.
@@ -38,7 +40,7 @@
 ## 1. O problema que tudo isto resolve
 
 O NexusOps tem um design de isolamento entre tenants — o chokepoint em `src/tenancy/`, as chaves
-estrangeiras compostas no schema, a Row-Level Security planejada. Esse design é o motivo de o
+estrangeiras compostas no schema, a Row-Level Security no banco. Esse design é o motivo de o
 projeto existir.
 
 Mas um design só vale enquanto continua verdadeiro. Basta **uma** refatoração distraída para que

@@ -10,7 +10,11 @@ import { RefreshTokenService } from '../auth/refresh-token.service';
 import { Prisma, User } from '../generated/prisma/client';
 import { UserRole } from '../generated/prisma/enums';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant } from '../tenancy/tenant-context';
+import {
+  runWithTenant,
+  fakeScope,
+  useScope,
+} from '../../test/utils/tenant-scope';
 import { QueryUsersDto } from './dto/query-users.dto';
 import { UsersService } from './users.service';
 
@@ -21,6 +25,8 @@ const duplicate = () =>
   });
 
 describe('UsersService', () => {
+  useScope(fakeScope());
+
   const admin: AuthenticatedUser = {
     id: 'admin-1',
     tenantId: 'tenant-a',
@@ -85,6 +91,7 @@ describe('UsersService', () => {
       prisma as unknown as ExtendedPrismaClient,
       hashing as unknown as HashingService,
       refreshTokens as unknown as RefreshTokenService,
+      fakeScope(),
     );
   });
 

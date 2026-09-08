@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DomainEvents } from '../tenancy/domain-events';
 import {
   AUDIT_ACTIONS,
   AUDIT_ENTITIES,
@@ -86,7 +86,7 @@ export type PaginatedTickets = {
 export class TicketsService {
   constructor(
     @Inject(PRISMA) private readonly prisma: ExtendedPrismaClient,
-    private readonly events: EventEmitter2,
+    private readonly events: DomainEvents,
   ) {}
 
   /**

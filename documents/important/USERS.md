@@ -519,8 +519,16 @@ Two properties of Prisma 7.10.0 hold that together, and both were measured:
 - **`AsyncLocalStorage` survives the `await`s inside the callback.** A scope opened _after_ the
   transaction has already started still applies to the queries that follow.
 
-`test/integration/auth-registration.int-spec.ts` pins both, plus the rollback: when the scoped write
-fails, the tenant goes with it.
+`test/integration/platform-companies.int-spec.ts` pins both, plus the rollback: when the scoped
+write fails, the tenant goes with it.
+
+**This is also the call site that decided the shape of Row-Level Security**, and it is worth knowing
+why before touching it. Once a scope became a transaction, the obvious rule — that
+`runWithoutTenant()` needs no transaction of its own, since `Tenant` has no policy — broke exactly
+here: the outer half and the inner half landed on two different connections, the tenant was set on
+the one that was not writing, and the writes died on the policy. The rule that replaced it is
+"every scope is a transaction, and a nested one reuses it". See
+[`../RLS_DESIGN.md`](../RLS_DESIGN.md), settled decision #0.
 
 ### The interceptor and the laziness of the Observable
 

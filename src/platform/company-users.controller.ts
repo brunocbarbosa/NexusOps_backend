@@ -15,7 +15,7 @@ import type { AuthenticatedUser } from '../auth/authenticated-user';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../generated/prisma/enums';
-import { runWithTenant } from '../tenancy/tenant-context';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { QueryUsersDto } from '../users/dto/query-users.dto';
 import { UpdateUserDto } from '../users/dto/update-user.dto';
@@ -46,6 +46,7 @@ export class CompanyUsersController {
   constructor(
     private readonly companies: CompaniesService,
     private readonly users: UsersService,
+    private readonly scope: TenantScopeService,
   ) {}
 
   /**
@@ -58,7 +59,7 @@ export class CompanyUsersController {
     fn: () => Promise<T>,
   ): Promise<T> {
     const company = await this.companies.requireCompany(companyId);
-    return runWithTenant(company.id, fn);
+    return this.scope.runWithTenant(company.id, fn);
   }
 
   @Post()

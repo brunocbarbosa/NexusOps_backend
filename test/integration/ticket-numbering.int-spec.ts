@@ -5,7 +5,9 @@ import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import {
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  scopeFor,
+  useScope,
+} from '../utils/tenant-scope';
 import { tenantScoped } from '../../src/tenancy/tenant-scoped';
 
 /**
@@ -90,7 +92,8 @@ describe('per-tenant ticket numbering', () => {
   };
 
   beforeAll(async () => {
-    prisma = createPrismaClient(process.env.DATABASE_URL as string);
+    prisma = createPrismaClient(process.env.DATABASE_URL as string, 25);
+    useScope(scopeFor(prisma));
     ({ tenantId: tenantA, requesterId: requesterA } = await seed('a'));
     ({ tenantId: tenantB, requesterId: requesterB } = await seed('b'));
   });

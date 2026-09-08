@@ -7,6 +7,7 @@ import { currentScope } from '../tenancy/tenant-context';
 import { AuthService } from './auth.service';
 import { HashingService } from './hashing.service';
 import { RefreshTokenService } from './refresh-token.service';
+import { fakeScope } from '../../test/utils/tenant-scope';
 
 describe('AuthService', () => {
   const tenant = {
@@ -78,6 +79,7 @@ describe('AuthService', () => {
       hashing as unknown as HashingService,
       jwt as unknown as JwtService,
       refreshTokens as unknown as RefreshTokenService,
+      fakeScope(),
     );
   });
 

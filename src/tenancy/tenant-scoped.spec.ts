@@ -1,11 +1,15 @@
+import { TenantContextMissingError } from './tenant-context';
 import {
-  TenantContextMissingError,
   runWithTenant,
   runWithoutTenant,
-} from './tenant-context';
+  fakeScope,
+  useScope,
+} from '../../test/utils/tenant-scope';
 import { tenantScoped } from './tenant-scoped';
 
 describe('tenantScoped', () => {
+  useScope(fakeScope());
+
   it('adds the active tenant to the payload', async () => {
     const data = await runWithTenant('tenant-a', () =>
       tenantScoped({ email: 'a@example.com' }),

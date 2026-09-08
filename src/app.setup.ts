@@ -4,6 +4,7 @@ import {
   ValidationPipeOptions,
 } from '@nestjs/common';
 import { TenantContextInterceptor } from './tenancy/tenant-context.interceptor';
+import { TenantScopeService } from './tenancy/tenant-scope.service';
 
 /**
  * The global validation settings, exported so a DTO can be unit-tested through
@@ -39,11 +40,17 @@ export const VALIDATION_PIPE_OPTIONS: ValidationPipeOptions = {
 export function configureApp(app: INestApplication): INestApplication {
   app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
 
-  // Establishes the AsyncLocalStorage tenant scope from the authenticated user,
-  // so no handler has to remember to do it. It needs no injected dependency, so
-  // it belongs here rather than as an APP_INTERCEPTOR provider; the guards that
-  // populate `request.user` do need the Reflector and live in AuthModule.
-  app.useGlobalInterceptors(new TenantContextInterceptor());
+  // Establishes the tenant scope from the authenticated user, so no handler has
+  // to remember to do it. Opening that scope now opens a database transaction,
+  // so the interceptor has a dependency where it used to have none — and it is
+  // resolved from the application rather than injected, because registering it
+  // here is the point: `app.setup.ts` is the one place that turns a bare Nest
+  // application into this one, and an APP_INTERCEPTOR provider would move that
+  // registration out of it. The guards that populate `request.user` do need the
+  // Reflector and live in AuthModule.
+  app.useGlobalInterceptors(
+    new TenantContextInterceptor(app.get(TenantScopeService)),
+  );
 
   return app;
 }

@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { DomainEvents } from '../tenancy/domain-events';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
 import { Comment, Ticket, User } from '../generated/prisma/client';
 import {
@@ -7,9 +8,12 @@ import {
   TicketStatus,
   UserRole,
 } from '../generated/prisma/enums';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant } from '../tenancy/tenant-context';
+import {
+  runWithTenant,
+  fakeScope,
+  useScope,
+} from '../../test/utils/tenant-scope';
 import { TicketWithPeople } from '../tickets/ticket-response';
 import { TicketsService } from '../tickets/tickets.service';
 import { CommentWithAuthor } from './comment-response';
@@ -78,6 +82,8 @@ const agent: AuthenticatedUser = {
 };
 
 describe('CommentsService', () => {
+  useScope(fakeScope());
+
   let prisma: {
     comment: { create: jest.Mock; findMany: jest.Mock; count: jest.Mock };
     $transaction: jest.Mock;
@@ -108,7 +114,7 @@ describe('CommentsService', () => {
     comments = new CommentsService(
       prisma as unknown as ExtendedPrismaClient,
       tickets as unknown as TicketsService,
-      events as unknown as EventEmitter2,
+      events as unknown as DomainEvents,
     );
   });
 
