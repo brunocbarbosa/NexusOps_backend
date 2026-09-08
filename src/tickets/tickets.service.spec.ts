@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
+import { DomainEvents } from '../tenancy/domain-events';
 import { Ticket, User } from '../generated/prisma/client';
 import {
   TicketCategory,
@@ -11,9 +12,12 @@ import {
   TicketStatus,
   UserRole,
 } from '../generated/prisma/enums';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant } from '../tenancy/tenant-context';
+import {
+  runWithTenant,
+  fakeScope,
+  useScope,
+} from '../../test/utils/tenant-scope';
 import { TicketWithPeople } from './ticket-response';
 import { TicketsService } from './tickets.service';
 
@@ -84,6 +88,8 @@ const admin: AuthenticatedUser = {
  * opened this scope by the time any of these methods run.
  */
 describe('TicketsService', () => {
+  useScope(fakeScope());
+
   let prisma: {
     ticket: {
       create: jest.Mock;
@@ -129,7 +135,7 @@ describe('TicketsService', () => {
     events = { emit: jest.fn() };
     tickets = new TicketsService(
       prisma as unknown as ExtendedPrismaClient,
-      events as unknown as EventEmitter2,
+      events as unknown as DomainEvents,
     );
   });
 

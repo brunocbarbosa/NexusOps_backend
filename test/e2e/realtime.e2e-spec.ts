@@ -7,7 +7,8 @@ import { App } from 'supertest/types';
 import { TicketStatus, UserRole } from '../../src/generated/prisma/enums';
 import { PRISMA } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
-import { runWithoutTenant } from '../../src/tenancy/tenant-context';
+import { runWithoutTenant, useScope } from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { createTestApp } from '../utils/create-test-app';
 import {
   FIXTURE_PASSWORD,
@@ -127,6 +128,7 @@ describe('Realtime (e2e)', () => {
 
   beforeAll(async () => {
     app = (await createTestApp()) as INestApplication<App>;
+    useScope(app.get(TenantScopeService));
     // A socket needs a listening server; `createTestApp` only calls init().
     await app.listen(0);
     // `App` is supertest's type and does not declare `address()`; the object

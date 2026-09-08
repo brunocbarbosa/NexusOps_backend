@@ -3,11 +3,13 @@ import {
   ExtendedPrismaClient,
   createPrismaClient,
 } from '../../src/prisma/prisma.client';
+import { TenantContextMissingError } from '../../src/tenancy/tenant-context';
 import {
-  TenantContextMissingError,
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  scopeFor,
+  useScope,
+} from '../utils/tenant-scope';
 import { CrossTenantWriteError } from '../../src/tenancy/tenant-extension';
 import { tenantScoped } from '../../src/tenancy/tenant-scoped';
 
@@ -31,6 +33,7 @@ describe('createPrismaClient (application client)', () => {
 
   beforeAll(async () => {
     prisma = createPrismaClient(process.env.DATABASE_URL as string);
+    useScope(scopeFor(prisma));
 
     // Tenant is the one tenant-agnostic model, so seeding it needs the explicit
     // unscoped escape hatch — exactly what the register/login paths use.

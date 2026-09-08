@@ -1,6 +1,8 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { configureApp } from './app.setup';
 import { TenantContextInterceptor } from './tenancy/tenant-context.interceptor';
+import { TenantScopeService } from './tenancy/tenant-scope.service';
+import { fakeScope } from '../test/utils/tenant-scope';
 
 // configureApp is the one place global application wiring is allowed to live,
 // which makes it worth a test of its own: if a pipe silently stops being
@@ -19,13 +21,22 @@ describe('configureApp', () => {
     const useGlobalInterceptors = jest.fn((...registered: unknown[]) => {
       interceptors.push(...registered);
     });
+    // The interceptor is built by hand rather than resolved by the container,
+    // so `configureApp` asks the application for its one dependency. A fake
+    // application therefore has to be able to answer `get` -- which is itself
+    // worth pinning: it is the only reason this function is not a plain object.
+    const get = jest.fn((token: unknown) =>
+      token === TenantScopeService ? fakeScope() : undefined,
+    );
     return {
       app: {
         useGlobalPipes,
         useGlobalInterceptors,
+        get,
       } as unknown as INestApplication,
       useGlobalPipes,
       useGlobalInterceptors,
+      get,
       pipes,
       interceptors,
     };

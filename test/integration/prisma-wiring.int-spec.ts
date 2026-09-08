@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../src/generated/prisma/client';
 import { tenantIsolationExtension } from '../../src/tenancy/tenant-extension';
-import { runWithTenant } from '../../src/tenancy/tenant-context';
+import { runWithTenant, scopeFor, useScope } from '../utils/tenant-scope';
 
 // Regression guard for the Prisma 7 wiring: the client only works when it is
 // generated as CJS, given a pg driver adapter, and run with VM modules enabled.
@@ -32,6 +32,7 @@ describe('the extension classifies every operation Prisma exposes', () => {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
   const prisma = new PrismaClient({ adapter });
   const scoped = prisma.$extends(tenantIsolationExtension);
+  useScope(scopeFor(scoped));
 
   // A tenant that does not exist: every call below runs for real, so nothing may
   // be allowed to touch another test's rows.

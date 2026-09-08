@@ -5,7 +5,7 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Observable, firstValueFrom, from } from 'rxjs';
-import { runWithTenant } from './tenant-context';
+import { TenantScopeService } from './tenant-scope.service';
 
 /**
  * The shape `JwtStrategy.validate()` puts on the request. Read structurally
@@ -35,6 +35,10 @@ type MaybeAuthenticatedRequest = {
  */
 @Injectable()
 export class TenantContextInterceptor implements NestInterceptor {
+  // Not resolved by the container: `configureApp` builds this by hand, so the
+  // scope service is handed to it there with `app.get()`. See src/app.setup.ts.
+  constructor(private readonly scope: TenantScopeService) {}
+
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     // WebSocket and BullMQ execution contexts have no HTTP request and no
     // AsyncLocalStorage to inherit; they carry the tenant in the message or job
@@ -64,7 +68,7 @@ export class TenantContextInterceptor implements NestInterceptor {
     // under this interceptor. Single-value handlers — every REST route, plus
     // StreamableFile, which emits one object — are unaffected.
     return from(
-      runWithTenant(tenantId, () =>
+      this.scope.runWithTenant(tenantId, () =>
         // defaultValue guards the case where a downstream interceptor completes
         // without emitting; without it firstValueFrom rejects with EmptyError.
         firstValueFrom(next.handle(), { defaultValue: undefined }),

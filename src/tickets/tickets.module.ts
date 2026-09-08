@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DomainEventsModule } from '../tenancy/domain-events.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
@@ -8,7 +9,7 @@ import { TicketsService } from './tickets.service';
   // rather than going through UsersService, because the question here is
   // "may this row hold a ticket", not "show me this user" — and importing the
   // users module for one role check would couple two verticals for nothing.
-  imports: [PrismaModule],
+  imports: [PrismaModule, DomainEventsModule],
   controllers: [TicketsController],
   providers: [TicketsService],
   // Exported for CommentsModule: comments hang off a ticket and have to resolve

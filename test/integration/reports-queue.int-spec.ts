@@ -14,11 +14,13 @@ import { PRISMA } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
 import { ReportsModule } from '../../src/reports/reports.module';
 import { ReportsService } from '../../src/reports/reports.service';
+import { currentScope } from '../../src/tenancy/tenant-context';
 import {
-  currentScope,
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  useScope,
+} from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { tenantScoped } from '../../src/tenancy/tenant-scoped';
 import { TicketsService } from '../../src/tickets/tickets.service';
 
@@ -114,6 +116,7 @@ describe('ticket report queue', () => {
         ReportsModule,
       ],
     }).compile();
+    useScope(mod.get(TenantScopeService));
     await mod.init();
 
     reports = mod.get(ReportsService);

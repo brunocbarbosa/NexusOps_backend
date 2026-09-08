@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { DomainEventsModule } from '../tenancy/domain-events.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { REPORTS_QUEUE } from './reports.constants';
@@ -10,6 +11,7 @@ import { ReportsService } from './reports.service';
 @Module({
   imports: [
     PrismaModule,
+    DomainEventsModule,
     // TicketsModule for `findAll()`: the worker pages through the caller's own
     // view rather than writing a query of its own, so the visibility rule has
     // one home. See the comment on ReportsProcessor.

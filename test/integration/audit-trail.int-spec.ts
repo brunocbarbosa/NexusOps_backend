@@ -11,11 +11,14 @@ import { validateEnv } from '../../src/config/env.validation';
 import { TicketStatus, UserRole } from '../../src/generated/prisma/enums';
 import { PRISMA } from '../../src/prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../../src/prisma/prisma.client';
+import { currentScope } from '../../src/tenancy/tenant-context';
 import {
-  currentScope,
+  fakeScope,
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  useScope,
+} from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { tenantScoped } from '../../src/tenancy/tenant-scoped';
 import { TicketsModule } from '../../src/tickets/tickets.module';
 import { TicketsService } from '../../src/tickets/tickets.service';
@@ -37,6 +40,11 @@ describe('audit trail', () => {
    * the answer is about the library and not about our wiring.
    */
   describe('the tenant scope across an emit', () => {
+    // Its own scope, and a fake one: this describe measures what the emitter
+    // does to AsyncLocalStorage, which needs no database at all. The real
+    // service arrives in the next describe's beforeAll, which runs later.
+    useScope(fakeScope());
+
     it('survives a synchronous listener', async () => {
       const emitter = new EventEmitter2({ wildcard: true });
       let seen: ReturnType<typeof currentScope> | undefined;
@@ -194,6 +202,7 @@ describe('audit trail', () => {
           AuditModule,
         ],
       }).compile();
+      useScope(mod.get(TenantScopeService));
       await mod.init();
 
       tickets = mod.get(TicketsService);

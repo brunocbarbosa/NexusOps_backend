@@ -9,7 +9,9 @@ import { PLATFORM_TENANT_DOMAIN } from '../../src/platform/platform.constants';
 import {
   runWithTenant,
   runWithoutTenant,
-} from '../../src/tenancy/tenant-context';
+  useScope,
+} from '../utils/tenant-scope';
+import { TenantScopeService } from '../../src/tenancy/tenant-scope.service';
 import { createTestApp } from '../utils/create-test-app';
 import {
   FIXTURE_PASSWORD,
@@ -64,6 +66,7 @@ describe('Platform (e2e)', () => {
   beforeAll(async () => {
     app = (await createTestApp()) as INestApplication<App>;
     prisma = app.get<ExtendedPrismaClient>(PRISMA);
+    useScope(app.get(TenantScopeService));
     // Logging in as the ADMIN_MASTER is itself the assertion that
     // PlatformBootstrapService seeded it from .env.test when the module booted.
     operator = await loginAsAdminMaster(app);

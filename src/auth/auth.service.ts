@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { User } from '../generated/prisma/client';
 import { PRISMA } from '../prisma/prisma.client';
 import type { ExtendedPrismaClient } from '../prisma/prisma.client';
-import { runWithTenant, runWithoutTenant } from '../tenancy/tenant-context';
+import { TenantScopeService } from '../tenancy/tenant-scope.service';
 import { UserResponse, toUserResponse } from '../users/user-response';
 import type {
   AccessTokenPayload,
@@ -36,6 +36,7 @@ export class AuthService {
     private readonly hashing: HashingService,
     private readonly jwt: JwtService,
     private readonly refreshTokens: RefreshTokenService,
+    private readonly scope: TenantScopeService,
   ) {}
 
   /**
@@ -46,7 +47,7 @@ export class AuthService {
    * runs inside the tenant, so the user lookup carries no hand-written filter.
    */
   async login(dto: LoginDto): Promise<AuthResult> {
-    const tenant = await runWithoutTenant(() =>
+    const tenant = await this.scope.runWithoutTenant(() =>
       this.prisma.tenant.findUnique({ where: { domain: dto.tenantDomain } }),
     );
 
@@ -55,7 +56,7 @@ export class AuthService {
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
-    const user = await runWithTenant(tenant.id, () =>
+    const user = await this.scope.runWithTenant(tenant.id, () =>
       // findFirst and not findUnique on tenantId_email: the compound unique
       // would mean writing the tenant by hand, and the extension is what puts
       // it in the where. The index is the same either way.
@@ -85,43 +86,61 @@ export class AuthService {
    * The scope comes from the token itself: refreshing happens precisely when
    * the access token has expired, so there is no authenticated user for
    * `TenantContextInterceptor` to have read and no scope to inherit.
+   *
+   * **The rejection is thrown after the scope closes, not inside it**, and that
+   * is load-bearing rather than tidy. A scope is a transaction now, so throwing
+   * from inside one rolls back everything it wrote — including the revocation
+   * on the reuse path, which is a security action that has to survive the very
+   * request it rejects. Leaving it inside would hand a thief a successor token
+   * that still works, and every test would still pass except the one that
+   * replays a spent token. So the scope returns a verdict and the caller throws
+   * on it.
    */
   async refresh(refreshToken: string): Promise<AuthResult> {
     const payload = await this.refreshTokens.verify(refreshToken);
 
-    return runWithTenant(payload.tenantId, async () => {
-      const outcome = await this.refreshTokens.consume(refreshToken);
+    const verdict = await this.scope.runWithTenant(
+      payload.tenantId,
+      async () => {
+        const outcome = await this.refreshTokens.consume(refreshToken);
 
-      if (outcome === 'unknown') {
-        throw new UnauthorizedException(INVALID_REFRESH);
-      }
+        if (outcome === 'unknown') {
+          return 'rejected' as const;
+        }
 
-      // A token that was already spent is being presented a second time. The
-      // legitimate holder and whoever copied it are indistinguishable from
-      // here, so every session of that user ends and both have to log in
-      // again. Doing nothing would leave the thief with a working chain.
-      if (outcome === 'reused') {
-        await this.refreshTokens.revokeAllFor(payload.sub);
-        throw new UnauthorizedException(INVALID_REFRESH);
-      }
+        // A token that was already spent is being presented a second time. The
+        // legitimate holder and whoever copied it are indistinguishable from
+        // here, so every session of that user ends and both have to log in
+        // again. Doing nothing would leave the thief with a working chain.
+        if (outcome === 'reused') {
+          await this.refreshTokens.revokeAllFor(payload.sub);
+          return 'rejected' as const;
+        }
 
-      const user = await this.prisma.user.findUnique({
-        where: { id: outcome.userId },
-      });
+        const user = await this.prisma.user.findUnique({
+          where: { id: outcome.userId },
+        });
 
-      // Same freshness check JwtStrategy makes: a week-long refresh token must
-      // not outlive the account it belongs to.
-      if (!user || user.deletedAt !== null) {
-        throw new UnauthorizedException(INVALID_REFRESH);
-      }
+        // Same freshness check JwtStrategy makes: a week-long refresh token must
+        // not outlive the account it belongs to.
+        if (!user || user.deletedAt !== null) {
+          return 'rejected' as const;
+        }
 
-      return this.issueTokens(user);
-    });
+        return { user };
+      },
+    );
+
+    if (verdict === 'rejected') {
+      throw new UnauthorizedException(INVALID_REFRESH);
+    }
+
+    return this.issueTokens(verdict.user);
   }
 
   /** Ends one session. Silent about tokens that are not the caller's. */
   async logout(refreshToken: string, user: AuthenticatedUser): Promise<void> {
-    await runWithTenant(user.tenantId, () =>
+    await this.scope.runWithTenant(user.tenantId, () =>
       this.refreshTokens.revoke(refreshToken, user.id),
     );
   }
@@ -140,7 +159,9 @@ export class AuthService {
     // rather than at each call site.
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload),
-      runWithTenant(user.tenantId, () => this.refreshTokens.issue(user.id)),
+      this.scope.runWithTenant(user.tenantId, () =>
+        this.refreshTokens.issue(user.id),
+      ),
     ]);
 
     return { accessToken, refreshToken, user: toUserResponse(user) };
