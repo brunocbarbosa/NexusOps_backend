@@ -1122,10 +1122,17 @@ problem** — the mutations still succeed, the trail is simply always empty.
 that reason. Without it, every other assertion in the suite would fail in a way that looks like a
 database problem.
 
-The same wiring caught a second thing worth knowing: `TicketsService` now injects `EventEmitter2`,
-which only exists once `forRoot()` has run. Two integration suites that build a `TestingModule` from
+The same wiring caught a second thing worth knowing: `TicketsService` injects an emitter, which
+only exists once `forRoot()` has run. Two integration suites that build a `TestingModule` from
 `TicketsModule` alone stopped resolving, and had to import it. That failure is the honest signal
 that emitting is now part of what a ticket mutation _is_.
+
+What it injects is **`DomainEvents`, not `EventEmitter2` directly**, and the indirection earns its
+place: a scope is a database transaction now, so an event raised inside one is queued and released
+after the commit. Emitting straight to the emitter would announce a change that a later statement
+could still roll back — and would hand the audit listener a transaction Prisma had already closed.
+The signature is the same, so no emit site changed shape. See
+[`../RLS_DESIGN.md`](../RLS_DESIGN.md), settled decision #3.
 
 ### `Prisma.DbNull`, not `null`, for an empty JSONB column
 

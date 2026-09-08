@@ -7,8 +7,9 @@ you add a model or a module. Its reader is a developer writing a feature on top 
 nothing in it requires reading the extension's source.
 
 **Part II is the measured behaviour**: what Prisma 7.10.0 was measured to do in this repository, and
-which of those facts the design depends on. Read it before editing `src/tenancy/tenant-extension.ts`
-or `src/tenancy/tenant-context.ts`, and re-check it after a Prisma upgrade —
+which of those facts the design depends on. Read it before editing anything in `src/tenancy/` —
+`tenant-extension.ts`, `tenant-context.ts`, `tenant-store.ts` or `tenant-scope.service.ts` — and
+re-check it after a Prisma upgrade —
 `test/integration/tenant-isolation.int-spec.ts` is what will tell you when one of them stops being
 true.
 
@@ -31,20 +32,40 @@ to prevent. Use `requireTenantId()`, which returns a string or throws.
 
 ### The API
 
-Everything a feature needs, from `src/tenancy/tenant-context.ts` and
-`src/tenancy/tenant-scoped.ts`:
+It comes in two halves, and the split is not cosmetic. **Reading** the scope is a free function;
+**opening** one is a method on an injected provider, because opening a scope also opens a database
+transaction and that needs a client only the container can hand out.
 
-| Export                      | Signature                                     | Use it when                                                               |
-| --------------------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
-| `requireTenantId()`         | `(): string`                                  | you need the current tenant id; throws when there is none                 |
-| `runWithTenant(id, fn)`     | `(string, () => T \| Promise<T>): Promise<T>` | you are outside a request — a worker, a socket handler, a test            |
-| `runWithoutTenant(fn)`      | `(() => T \| Promise<T>): Promise<T>`         | a read genuinely must not be scoped: login, and the platform's own routes |
-| `tenantScoped(data)`        | `<T>(T): T & { tenantId: string }`            | wrapping the `data` of a top-level `create`                               |
-| `currentScope()`            | `(): TenantScope`                             | the extension's own branching; application code wants `requireTenantId()` |
-| `TenantContextMissingError` | error class                                   | catching or asserting the absence of a scope                              |
+Free functions, from `src/tenancy/tenant-context.ts` and `src/tenancy/tenant-scoped.ts`:
+
+| Export                      | Signature                          | Use it when                                                               |
+| --------------------------- | ---------------------------------- | ------------------------------------------------------------------------- |
+| `requireTenantId()`         | `(): string`                       | you need the current tenant id; throws when there is none                 |
+| `tenantScoped(data)`        | `<T>(T): T & { tenantId: string }` | wrapping the `data` of a top-level `create`                               |
+| `currentScope()`            | `(): TenantScope`                  | the extension's own branching; application code wants `requireTenantId()` |
+| `TenantContextMissingError` | error class                        | catching or asserting the absence of a scope                              |
+
+Methods on `TenantScopeService`, injected from `PrismaModule`:
+
+| Method                        | Signature                                     | Use it when                                                               |
+| ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
+| `scope.runWithTenant(id, fn)` | `(string, () => T \| Promise<T>): Promise<T>` | you are outside a request — a worker, a socket handler, a test            |
+| `scope.runWithoutTenant(fn)`  | `(() => T \| Promise<T>): Promise<T>`         | a read genuinely must not be scoped: login, and the platform's own routes |
+| `scope.attempt(fn)`           | `(() => Promise<T>): Promise<T>`              | a `catch` around it will query the database afterwards                    |
 
 `runWithTenant` is **async and must be awaited**, and that is not a style choice — see Part II on
 `PrismaPromise` laziness.
+
+**`attempt()` is the one that surprises people.** A scope is a transaction, and any database error
+aborts the whole transaction — every statement after it answers `25P02`. So code that catches a
+constraint violation and then asks the database _why_ gets an error instead of an answer.
+`attempt()` runs its body inside a `SAVEPOINT`, so the transaction survives and the original error
+still propagates. `UsersService.create()` is the worked example: it inserts, catches the unique
+violation, and reads back to tell "this address is taken" from "this person was deactivated".
+
+**A scope that throws rolls back everything it wrote.** That is right for a mutation and wrong for a
+write made _because_ the request is being rejected — revoking a replayed refresh-token family, say.
+Return a verdict from the scope and throw outside it; `AuthService.refresh()` is the one case.
 
 `runWithoutTenant()` is deliberately explicit and greppable: `grep -rn runWithoutTenant src/` is a
 complete audit of every unscoped read in the codebase. Keep that list short enough to read. There
@@ -69,12 +90,18 @@ before any query runs:
 
 ```ts
 // The shape every worker must have.
-async function process(job: Job<{ tenantId: string; ticketId: string }>) {
-  await runWithTenant(job.data.tenantId, async () => {
+async process(job: Job<{ tenantId: string; ticketId: string }>) {
+  await this.scope.runWithTenant(job.data.tenantId, async () => {
     // every query in here is scoped
   });
 }
 ```
+
+**One scope per unit of work, not one per job.** A scope holds a transaction, and a transaction
+holds a pooled connection: wrapping a job that pages through thousands of rows in a single scope
+holds one connection for the length of the whole export and buys nothing, because Prisma runs at
+`read committed` and each statement takes a fresh snapshot anyway. `ReportsProcessor` is the worked
+example — one scope to mark the row, one per page, one for the result, one for the failure path.
 
 **This is the single most likely place in the project for a tenant leak.** Not because the
 mechanism is fragile — the query throws rather than running unfiltered — but because the fix under
@@ -110,7 +137,7 @@ carries its own filter or it is a leak.
 ### Adding a new tenant-scoped model
 
 The schema is doing half the isolation work, so a new model is not protected by the extension
-alone. Four things, and the third is the one that gets forgotten:
+alone. Five things, and the third is the one that gets forgotten:
 
 1. **A `tenantId` column** mapped to `tenant_id`, plus the `Tenant` relation with `onDelete: Cascade`.
 2. **`@@unique([tenantId, id])`.** This is what lets the extension scope a `findUnique`, and it
@@ -122,6 +149,14 @@ alone. Four things, and the third is the one that gets forgotten:
    being expressible at the type level.
 4. **Nothing in the extension.** Every model is scoped by default; only the `TENANT_AGNOSTIC`
    allowlist is exempt. Forgetting to register a new model leaves it already protected.
+5. **A Row-Level Security policy**, in a hand-written migration — Prisma does not model RLS, so
+   nothing generates this for you. Copy the block from
+   `prisma/migrations/*_row_level_security/migration.sql`: `ENABLE`, `FORCE`, and one policy with
+   `nullif(current_setting('app.tenant_id', true), '')::uuid` on both `USING` and `WITH CHECK`. The
+   grants need nothing — `ALTER DEFAULT PRIVILEGES` already covers a table a future migration
+   creates. **Forgetting this one fails a test rather than leaking**:
+   `test/integration/rls.int-spec.ts` reads the table list from the catalogue, so any table carrying
+   `tenant_id` without RLS enabled, forced and exactly one policy turns it red.
 
 Then in the service: `prisma.thing.create({ data: tenantScoped({ ... }) })` for a top-level create,
 and plain queries everywhere else.
@@ -159,13 +194,14 @@ other instead of trusting each other.
 Nested creates need nothing: the composite foreign keys mean Prisma regenerates the nested input
 without a `tenantId` field at all.
 
-### The three errors, and what each one means
+### The errors, and what each one means
 
-| Error                              | Thrown when                                             | What to do                                                                 |
-| ---------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `TenantContextMissingError`        | a query ran with no scope                               | you are outside a request — wrap in `runWithTenant()` from the job payload |
-| `CrossTenantWriteError`            | a write supplied a `tenantId` other than the active one | a bug: the write was trying to move a row between tenants                  |
-| `TenantScopeUnknownOperationError` | an unclassified operation, or a Mongo-only one          | classify it in `src/tenancy/tenant-extension.ts`                           |
+| Error                              | Thrown when                                             | What to do                                                                   |
+| ---------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `TenantContextMissingError`        | a query ran with no scope                               | you are outside a request — wrap in `scope.runWithTenant()` from the payload |
+| `25P02` from a query after a catch | an earlier statement failed and aborted the transaction | the failing statement needed `scope.attempt()`                               |
+| `CrossTenantWriteError`            | a write supplied a `tenantId` other than the active one | a bug: the write was trying to move a row between tenants                    |
+| `TenantScopeUnknownOperationError` | an unclassified operation, or a Mongo-only one          | classify it in `src/tenancy/tenant-extension.ts`                             |
 
 `TenantContextMissingError` firing from code that _visibly_ established a tenant has one usual
 cause, and it is in Part II: a `PrismaPromise` awaited outside the scope that created it.

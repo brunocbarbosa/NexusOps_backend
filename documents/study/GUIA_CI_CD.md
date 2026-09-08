@@ -40,7 +40,7 @@
 ## 1. O problema que tudo isto resolve
 
 O NexusOps tem um design de isolamento entre tenants — o chokepoint em `src/tenancy/`, as chaves
-estrangeiras compostas no schema, a Row-Level Security planejada. Esse design é o motivo de o
+estrangeiras compostas no schema, a Row-Level Security no banco. Esse design é o motivo de o
 projeto existir.
 
 Mas um design só vale enquanto continua verdadeiro. Basta **uma** refatoração distraída para que
